@@ -199,32 +199,35 @@ physically separated. BH carries the exact LBA of all three IRs.
 
 ## Bootstrap Header (BH)
 
-Written once at `mkfs`. **Never updated during normal operation.**
+Written once at `mkfs`. **Almost never updated during normal operation.**
 
-The BH carries only immutable identity and structural pointers.
+The BH carries immutable identity and structural pointers.
 It is not a superblock. It has no counters, no mount timestamps,
 no runtime state of any kind.
+
+Exception: `ir3_start` and `ir_size` are updated when IR regions expand
+(see IR Expansion). This is a rare, explicit operation, not routine I/O.
 
 ```
 Offset  Size    Field           Description
 ------  ----    -----           -----------
-0       8       BH_SIG          Magic: "ResFSBH0"
-8       4       version         u32, format version (1)
-12      4       block_size      u32, always 4096
-16      16      fs_uuid         UUID of this filesystem instance
-32      1       label_len       u8, length of fs_label
-33      255     fs_label        UTF-8 filesystem label, null-padded
-288     4       feature_flags   u32, see Feature Flags section
-292     8       ir1_start       u64, LBA of IR1
-300     8       ir2_start       u64, LBA of IR2
-308     8       ir3_start       u64, LBA of IR3
-316     8       ir_size         u64, size of each IR region in blocks (all equal)
-324     8       snap_start      u64, LBA of Snapshot Region
-332     8       snap_size       u64, size of Snapshot Region in blocks
-340     8       data_start      u64, LBA of Data Region start
-348     8       total_blocks    u64, total blocks in partition
-356     32      blake3_hash     BLAKE3 of bytes [0..355]
-388     3708    reserved        Must be zero (pad to 4096 bytes)
+0       16      BH_SIG          Magic: "RESFS PARTITION "
+16      4       version         u32, format version (1)
+20      4       block_size      u32, always 4096
+24      16      fs_uuid         UUID of this filesystem instance
+40      1       label_len       u8, length of fs_label
+41      255     fs_label        UTF-8 filesystem label, null-padded
+296     4       feature_flags   u32, see Feature Flags section
+300     8       ir1_start       u64, LBA of IR1 (fixed at mkfs, never changes)
+308     8       ir2_start       u64, LBA of IR2 (fixed at mkfs, never changes)
+316     8       ir3_start       u64, LBA of IR3 (moves left on expansion)
+324     8       ir_size         u64, size of each IR in blocks (all equal, grows on expansion)
+332     8       snap_start      u64, LBA of Snapshot Region
+340     8       snap_size       u64, size of Snapshot Region in blocks
+348     8       data_start      u64, LBA of Data Region start
+356     8       total_blocks    u64, total blocks in partition
+364     32      blake3_hash     BLAKE3 of bytes [0..363]
+396     3700    reserved        Must be zero (pad to 4096 bytes)
 ```
 
 ### Feature Flags
@@ -698,20 +701,18 @@ Offset  Size    Field               Description
 112     3984    reserved            pad to 4096 bytes
 ```
 
-### SMI Entry (64 bytes, fixed)
+### SMI Entry (28 bytes, fixed)
 
 ```
 Offset  Size    Field               Description
 ------  ----    -----               -----------
 0       8       file_id             u64
 8       4       segment_count       u32
-12      4       reserved            u32, must be 0
-16      8       extent_offset       u64, offset into extent pool
-24      8       extent_count        u64
-32      32      reserved            Must be 0
+12      8       extent_offset       u64, byte offset into extent pool
+20      8       extent_count        u64
 ```
 
-### Extent (32 bytes, fixed)
+### Extent (24 bytes, fixed)
 
 ```
 Offset  Size    Field               Description
@@ -720,17 +721,20 @@ Offset  Size    Field               Description
 8       8       length_blocks       u64
 16      4       seg_start_index     u32
 20      4       seg_count           u32
-24      8       reserved            Must be 0
 ```
 
 ### SMI On-Disk Layout
 
 ```
 [SMI HEADER 4KB]
-[ENTRY TABLE: entry_count × 64B]
-[EXTENT POOL: flat array of 32B extents]
-[zeroed padding to end of the last segment]
+[ENTRY TABLE: flat array, entry_count × 28B]
+[EXTENT POOL: flat array, entry_count × 24B per file (avg)]
+[zeroed padding to DLI start]
 ```
+
+The boundary between Entry Table and Extent Pool is determined by
+`extent_pool_offset` in the SMI Header. No signatures between regions —
+all addressing is through header offsets.
 
 ### IR Copy Selection (on mount)
 
@@ -896,22 +900,91 @@ Each Index Region contains exactly one SMI and one DLI.
 SMI and DLI within the same IR share the same generation number.
 Both are validated together on mount.
 
-All three IRs are identical in size (`ir_size` from BH).
-The size is fixed at mkfs and never changes.
+All three IRs are always identical in size (`ir_size` from BH).
 
 ```
 [Index Region N]  (ir_size blocks total)
     [SMI Header 4KB]
-    [SMI Entry Table: entry_count × 64B]
-    [SMI Extent Pool: flat array of 32B extents]
+    [SMI Entry Table: flat array, entry_count × 28B]
+    [SMI Extent Pool: flat array, addressed via extent_offset]
     [DLI Header 4KB]
-    [DLI Entry Array: entry_count × 24B]
+    [DLI Entry Array: flat array, entry_count × 24B]
     [zeroed padding]
 ```
 
-IR size recommendation at mkfs: `max(MIN_IR_BLOCKS, total_blocks / 1000)`.
-Minimum `MIN_IR_BLOCKS = 256` (1MB). This accommodates growth without
-requiring a filesystem resize operation.
+### Initial IR Placement (at mkfs)
+
+```
+ir_size = max(MIN_IR_BLOCKS, total_blocks * 3 / 1000)
+MIN_IR_BLOCKS = 768 (3MB)
+
+IR1: ir1_start = 1 (immediately after BH)
+IR2: ir2_start = total_blocks / 2
+IR3: ir3_start = total_blocks - ir_size - 1 - buffer_blocks
+EOP: last_lba  = total_blocks - 1
+
+buffer_blocks = max(1280, total_blocks * 5 / 1000)  (~0.5%, min 5MB)
+```
+
+The buffer zones (~0.5% of disk) around each IR are kept free by
+the allocator when other free space exists elsewhere. They provide
+room for IR expansion without immediate file relocation.
+
+### IR Expansion
+
+IRs expand when SMI + DLI approach capacity. All three IRs always
+grow together — `ir_size` is always equal for all three.
+
+```
+IR1: ir1_start fixed, grows downward into Data Region
+IR2: ir2_start fixed, grows downward into Data Region
+IR3: ir3_start moves left (decreases), grows leftward
+```
+
+**Expansion algorithm:**
+
+```
+1. Check free_blocks > RESFS_MIN_FREE (1% of total_blocks)
+   if not → RESFS_ERR_NO_SPACE, abort
+
+2. Calculate new_ir_size = ir_size * 2 (double each time)
+
+3. For IR1 and IR2: identify blocks in
+   [ir_start + old_ir_size .. ir_start + new_ir_size - 1]
+   Relocate any files occupying those blocks via CoW:
+     a. Allocate new blocks in Data Region
+     b. Write file segments to new blocks (IS_COMMITTED not set)
+     c. fsync
+     d. Set IS_COMMITTED on new segments
+     e. Clear IS_COMMITTED on old segments
+
+4. For IR3: new ir3_start = ir3_start - (new_ir_size - old_ir_size)
+   Relocate files in [new_ir3_start .. old_ir3_start - 1] via CoW
+   (same steps as above)
+
+5. Write expanded SMI + DLI into all three new IR regions
+6. Verify all three IRs (BLAKE3)
+7. Update BH: new ir_size + new ir3_start → recompute BLAKE3 → write BH
+8. GC old segment copies (lazy, background)
+
+Power loss before step 7:
+  → BH unchanged → old IR valid → old file copies alive → clean state
+
+Power loss after step 7:
+  → new BH valid → new IRs valid → new file copies committed
+  → old copies cleaned by GC on next mount
+```
+
+**Capacity limits on 1TB disk:**
+
+| ir_size | files supported |
+|---------|----------------|
+| 0.3% (~3GB) | ~38M files |
+| 0.6% (~6GB) | ~76M files |
+| 1.2% (~12GB) | ~152M files |
+
+Expansion doubles ir_size each time. Three IRs total overhead stays
+proportional — at 0.3% initial size, three IRs = 0.9% of disk.
 
 ---
 
@@ -986,7 +1059,7 @@ Power loss before step 2:
 
 Power loss after step 2:
   → new name committed
-  → DLI stale → rebuilt from directory segments
+  → DHT stale → rebuilt from directory segments
 ```
 
 ---
