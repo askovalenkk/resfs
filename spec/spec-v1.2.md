@@ -986,7 +986,7 @@ Power loss before step 2:
 
 Power loss after step 2:
   → new name committed
-  → DHT stale → rebuilt from directory segments
+  → DLI stale → rebuilt from directory segments
 ```
 
 ---
