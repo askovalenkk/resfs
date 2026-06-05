@@ -1295,5 +1295,7 @@ SMI header carries file_counter, used_blocks. CoW write path formalized.
 ---
 
 *ResFS Specification v1.2*
+
 *Author: Andrei Kovalenko*
-*License: TBD*
+
+*License: PGSL-NC*
