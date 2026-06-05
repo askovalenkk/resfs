@@ -678,7 +678,7 @@ is always possible.
 The SMI header also carries `file_counter` and `used_blocks` —
 allocation state that belongs to the physical layer.
 
-### SMI Header (512 bytes, fixed)
+### SMI Header (4096 bytes, fixed)
 
 ```
 Offset  Size    Field               Description
@@ -695,7 +695,7 @@ Offset  Size    Field               Description
 64      8       extent_pool_offset  u64, relative to SMI start
 72      8       reserved            Must be 0
 80      32      blake3_root         BLAKE3 of entire SMI body
-112     400     reserved            pad to 512 bytes
+112     3984    reserved            pad to 4096 bytes
 ```
 
 ### SMI Entry (64 bytes, fixed)
@@ -726,10 +726,10 @@ Offset  Size    Field               Description
 ### SMI On-Disk Layout
 
 ```
-[SMI HEADER 512B]
+[SMI HEADER 4KB]
 [ENTRY TABLE: entry_count × 64B]
 [EXTENT POOL: flat array of 32B extents]
-[zeroed padding to end of IR region]
+[zeroed padding to end of the last segment]
 ```
 
 ### IR Copy Selection (on mount)
@@ -748,7 +748,7 @@ Offset  Size    Field               Description
 ### SMI Rebuild (all IR copies invalid)
 
 ```
-1. Full segment scan of Data Region
+1. Full segment scan of Data Regions
 2. Find all segments by magic "ResFSSEG"
 3. Verify BLAKE3 of each candidate
 4. Filter: IS_COMMITTED set, IS_DELETED not set
@@ -765,80 +765,126 @@ Offset  Size    Field               Description
 
 ---
 
-## DHT — Directory Hash Table
+## DLI - Directory List Index
 
-The DHT is the namespace acceleration layer: `(parent_dir_id, name) → file_id`.
+The DLI is the namespace acceleration layer: `(parent_dir_id, name) → file_id`.
 It is a cache. Destroying it loses nothing — rebuilding from directory
 segments is always possible.
 
-### DHT Header (512 bytes, fixed)
+### DLI Header (4096 bytes, fixed)
 
 ```
 Offset  Size    Field               Description
 ------  ----    -----               -----------
-0       8       magic               "DHT0\0\0\0\0"
+0       8       magic               "DLI0\0\0\0\0"
 8       4       version             u32
 12      4       reserved            u32, must be 0
 16      8       generation          u64, same as SMI generation in same IR
 24      8       entry_count         u64
-32      8       bucket_count        u64
-40      8       bucket_table_offset u64, relative to DHT start
-48      8       overflow_offset     u64, relative to DHT start
-56      32      blake3_root         BLAKE3 of entire DHT body
-88      424     reserved            pad to 512 bytes
+32      8       entry_size          u64
+40      8       data_offset         u64, relative to DLI start
+48      32      blake3_root         BLAKE3 of entire DLI entry array
+80      4016    reserved            pad to 4096 bytes
 ```
 
-### DHT Entry (64 bytes, fixed)
+### DLI Entry (64 bytes, fixed)
 
 ```
 Offset  Size    Field               Description
 ------  ----    -----               -----------
-0       8       hash                u64 = BLAKE3(parent_dir_id || "/" || name)[0..7]
+0       8       name_hash           u64 = BLAKE3(name)[0..7]
 8       8       parent_dir_id       u64
 16      8       file_id             u64
-24      4       name_len            u32
-28      4       flags               u32
-32      32      name_blake3         BLAKE3 of name (collision detection)
 ```
 
-### DHT Hash Function
+### Entry Ordering Rule
+
+DLI entries are always sorted by:
+```
+
+```
+
+### Lookup Algorithm (Binary Search)
+
+Step 1 - compute key
 
 ```c
-// hash = first 8 bytes of BLAKE3(parent_dir_id || "/" || name)
-uint8_t input[8 + 1 + name_len];
-memcpy(input, &parent_dir_id, 8);
-input[8] = '/';
-memcpy(input + 9, name, name_len);
-
-uint8_t digest[32];
-blake3(input, sizeof(input), digest);
-uint64_t hash;
-memcpy(&hash, digest, 8);
+name_hash = BLAKE3(name)[0..7]
+key = (parent_dir_id, name_hash)
 ```
 
-### DHT Bucket Addressing
+Step 2 - binary search
+
+```c
+low = 0
+high = entry_count - 1
+
+while low <= high:
+    mid = (low + high) / 2
+
+    if DLI[mid] < key:
+        low = mid + 1
+    else if DLI[mid] > key:
+        high = mid - 1
+    else:
+        return file_id
+```
+
+### Entry Comparison Rules
+
+Comparison is lexicographic:
 
 ```
-bucket_index = hash % bucket_count
-collision    → overflow chain
+if parent_dir_id != other.parent_dir_id:
+    compare parent_dir_id
+
+else:
+    compare name_hash
 ```
 
-### DHT Rebuild
+### DLI Rebuild
+
+DLI is NEVER updated in-place.
+It is fully rebuilt from directory segments:
+Steps:
 
 ```
-1. Scan all IS_DIRECTORY segments (IS_COMMITTED set, IS_DELETED not set)
-2. For each directory segment, read all entries
-3. Skip ENTRY_DELETED entries
-4. For each live entry: insert (parent_dir_id, name) → file_id into DHT
-5. Write new DHT into all three IR copies
+1. Scan all directory segments (IS_COMMITTED, not IS_DELETED)
+
+2. Extract entries:
+   (parent_dir_id, name, file_id)
+
+3. Compute:
+   name_hash = BLAKE3(name)[0..7]
+
+4. Build array of DLIEntry
+
+5. Sort array by (parent_dir_id, name_hash)
+
+6. Write new DLI
+
+7. Atomically switch IR pointer
 ```
 
-### DHT On-Disk Layout
+### Deletion Semantics
+
+Deleted entries are NOT removed immediately.
 
 ```
-[DHT HEADER 512B]
-[BUCKET TABLE: bucket_count × 8B (offsets into overflow area)]
-[OVERFLOW CHAIN: DHT entries, 64B each]
+Directory entry marked ENTRY_DELETED in segments
+```
+
+During rebuild:
+
+```
+Skip ENTRY_DELETED entries
+```
+
+### DLI On-Disk Layout
+
+```
+[DLI HEADER 4KB]
+[DLI ENTRY ARRAY (sorted, contigious): entry_count x 24B]
 [zeroed padding to end of IR region]
 ```
 
@@ -846,8 +892,8 @@ collision    → overflow chain
 
 ## Index Region Layout
 
-Each Index Region contains exactly one SMI and one DHT.
-SMI and DHT within the same IR share the same generation number.
+Each Index Region contains exactly one SMI and one DLI.
+SMI and DLI within the same IR share the same generation number.
 Both are validated together on mount.
 
 All three IRs are identical in size (`ir_size` from BH).
@@ -855,12 +901,11 @@ The size is fixed at mkfs and never changes.
 
 ```
 [Index Region N]  (ir_size blocks total)
-    [SMI Header 512B]
+    [SMI Header 4KB]
     [SMI Entry Table: entry_count × 64B]
     [SMI Extent Pool: flat array of 32B extents]
-    [DHT Header 512B]
-    [DHT Bucket Table]
-    [DHT Overflow Chain]
+    [DLI Header 4KB]
+    [DLI Entry Array]
     [zeroed padding]
 ```
 
@@ -888,14 +933,14 @@ Power loss at any step leaves the filesystem in a consistent state.
 6. Write new directory segment (CoW: new SEG for parent dir)
    Set IS_COMMITTED on new dir segment
    Clear IS_COMMITTED on old dir segment
-7. Update DHT: insert (parent_dir_id, name) → file_id
+7. Update DLI: insert (parent_dir_id, name) → file_id
 
 Power loss before step 4:
   → segments not committed → invisible → clean state
 
 Power loss after step 4:
   → file exists and is recoverable
-  → SMI/DHT stale → rebuilt from scan on next mount
+  → SMI/DLI stale → rebuilt from scan on next mount
 ```
 
 ### WRITE / APPEND
@@ -1166,9 +1211,9 @@ mode 2 — recovery container:
 | Server              | ✅         | CoW + snapshots                     |
 | Linux               | ✅         | Via FUSE mount                      |
 | macOS Intel         | ✅         | Via macFUSE                         |
-| macOS Apple Silicon | ⚠️        | Requires disabling Secure Boot      |
+| macOS Apple Silicon | ⚠️          | Requires disabling Secure Boot      |
 | Windows             | ✅         | Via WinFSP                          |
-| Custom kernel       | ✅ Target  | libresfs portable, no OS deps       |
+| RhCOS               | ✅ Target  | libresfs portable, no OS deps       |
 
 ---
 
