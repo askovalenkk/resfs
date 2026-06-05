@@ -224,10 +224,8 @@ Offset  Size    Field           Description
 340     8       data_start      u64, LBA of Data Region start
 348     8       total_blocks    u64, total blocks in partition
 356     32      blake3_hash     BLAKE3 of bytes [0..355]
-388     124     reserved        Must be zero (pad to 512 bytes)
+388     3708    reserved        Must be zero (pad to 4096 bytes)
 ```
-
-**BH is 512 bytes, fixed.**
 
 ### Feature Flags
 
