@@ -279,10 +279,9 @@ EOP_TAIL layout (32 bytes):
 
 On hex dump the last block ends visually as:
 ```
-...00 00 00 45 4E 44 20 4F  ...END O
-   46 20 52 45 53 46 53 20  F RESFS 
-   50 41 52 54 49 54 49 4F  PARTITIO
-   4E                       N
+...00 00 45 4E 44 20 4F 46 ..END OF
+   20 52 45 53 46 53 20 50 RESFS P
+   41 52 54 49 54 49 4F 4E ARTITION
 ```
 
 **EOP is 4096 bytes (one block), fixed.**
