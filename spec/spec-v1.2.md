@@ -787,7 +787,7 @@ Offset  Size    Field               Description
 80      4016    reserved            pad to 4096 bytes
 ```
 
-### DLI Entry (64 bytes, fixed)
+### DLI Entry (24 bytes, fixed)
 
 ```
 Offset  Size    Field               Description
@@ -801,7 +801,7 @@ Offset  Size    Field               Description
 
 DLI entries are always sorted by:
 ```
-
+sorted_by (parent_dir_id ASC, name_hash ASC)
 ```
 
 ### Lookup Algorithm (Binary Search)
@@ -884,7 +884,7 @@ Skip ENTRY_DELETED entries
 
 ```
 [DLI HEADER 4KB]
-[DLI ENTRY ARRAY (sorted, contigious): entry_count x 24B]
+[DLI ENTRY ARRAY (sorted, contigious): entry_count × 24B]
 [zeroed padding to end of IR region]
 ```
 
@@ -905,7 +905,7 @@ The size is fixed at mkfs and never changes.
     [SMI Entry Table: entry_count × 64B]
     [SMI Extent Pool: flat array of 32B extents]
     [DLI Header 4KB]
-    [DLI Entry Array]
+    [DLI Entry Array: entry_count × 24B]
     [zeroed padding]
 ```
 
@@ -965,12 +965,12 @@ Power loss after step 3:
 
 ```
 1. Set IS_DELETED on SEG 0 of file           ← atomic commit point
-2. Remove DHT entry
+2. Remove DLI entry
 3. SMI cleanup deferred to resfs-gc
 
 Power loss after step 1:
   → file is deleted (IS_DELETED on SEG 0 is authoritative)
-  → DHT/SMI stale → rebuilt correctly on next mount
+  → DLI/SMI stale → rebuilt correctly on next mount
 ```
 
 ### RENAME
@@ -979,7 +979,7 @@ Power loss after step 1:
 1. Write new directory segment (CoW): old entry tombstoned, new entry added
 2. Set IS_COMMITTED on new dir segment       ← atomic commit point
 3. Clear IS_COMMITTED on old dir segment
-4. Update DHT: remove old entry, insert new entry
+4. Update DLI: remove old entry, insert new entry
 
 Power loss before step 2:
   → new dir segment not committed → old name survives
