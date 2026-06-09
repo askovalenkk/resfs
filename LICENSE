@@ -1,0 +1,56 @@
+PETALSOFT GENERAL NON-COMMERCIAL SOFTWARE LICENSE (PGSL-NC)
+-- Version 1.0 / November 9, 2025 --
+
+Copyright (c) 2026 Andrei Kovalenko
+
+
+PREAMBLE
+The PetalSoft General Non-Commercial Software License (PGSL-NC) is a free, open-source license
+designed to promote creativity, learning, and collaboration while protecting the author’s 
+moral and economic rights. It ensures that the Software remains free for personal, educational, 
+and research use, but not for commercial exploitation.
+
+By using, copying, or modifying any Software under this license, you agree to comply with the 
+terms and principles set forth herein.
+
+
+I. DEFINITIONS
+1. "Software" means the source code, binary files, and any associated documentation.
+2. "Non-Commercial Use" means any use that is not primarily intended for or directed toward 
+   commercial advantage or monetary compensation, including but not limited to selling, licensing, 
+   or providing paid services.
+3. "Derivative Works" means any modifications, improvements, adaptations, or extensions of the Software.
+4. "Distribution" means making the Software or any of its Derivative Works available to any third party 
+   in any form.
+
+
+II. PERMISSIONS
+Subject to the conditions and restrictions of this license, permission is granted to any person 
+obtaining a copy of the Software to:
+1. Use the Software for personal, educational, and research purposes;
+2. Copy and distribute the Software, provided that this license notice is included in all copies;
+3. Create and distribute Derivative Works under the same terms of this license or a later version 
+   published by the author.
+
+
+III. RESTRICTIONS
+1. The Software may not be used for any commercial purpose without prior written permission from the author.
+2. Derivative Works may not be distributed under any license other than this one or its future versions 
+   officially published by the author.
+3. The copyright notice and this license notice must not be removed or altered.
+
+
+IV. OBLIGATIONS 
+1. Proper credit must be given to the original author in any public use, copy, or distribution of the
+   Software or any Derivative Works.
+2. All Derivative Works must clearly indicate that they are based on or derived from the original Software.
+3. Any Derivative Work or Distribution must include a complete copy of this license.
+4. Failure to comply with the attribution or license-inclusion requirements automatically terminates 
+   the permissions granted under Section II.
+
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING 
+BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, OR 
+NON-INFRINGEMENT. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER 
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, 
+OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
