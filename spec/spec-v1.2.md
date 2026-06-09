@@ -1,4 +1,4 @@
-# ResFS Specification v1.2
+# ResFS Specification v1.4
 > Recovery-First Filesystem — every physically intact segment is recoverable,
 > deterministically, without heuristics, even if all metadata is destroyed.
 
@@ -33,7 +33,7 @@ Truth:
 
 Mount Acceleration:
     SMI (Segment Map Index)     ← physical layer cache
-    DHT (Directory Hash Table)  ← namespace layer cache
+    DLI (Directory List Index)  ← namespace layer cache
 
 Catastrophic Recovery:
     Full Disk Scan      ← always works if segments are intact
@@ -63,7 +63,7 @@ ResFS guarantees recovery of every physically intact segment.
 | Conflict | Resolution |
 |----------|-----------|
 | SMI says file has extents [A,B,C], segments show [A,C] | Segments win. SMI rebuilt. |
-| DHT says file exists, no segments found for file_id | File does not exist. DHT entry purged. |
+| DLI says file exists, no segments found for file_id | File does not exist. DLI entry purged. |
 | Two segments with identical file_id + seg_index, both valid BLAKE3 | Take segment at lower LBA (deterministic). |
 | Segment missing in middle of chain (gap) | File partially recovered, gap filled with zeros, recovery_info written. |
 
@@ -74,10 +74,10 @@ ResFS guarantees recovery of every physically intact segment.
 ResFS partition type GUID for GPT:
 
 ```
-52455346-494C-4553-5953-54454D414B21
+52455346-494C-4553-5953-54454D2F414B
 ```
 
-Encodes "RESFILESYSTEM" in ASCII.
+Encodes "RESFILESYSTEM/AK" in ASCII — filesystem name and author initials.
 Every ResFS partition on every disk carries this signature.
 This is part of the standard — permanent and immutable.
 
@@ -183,7 +183,7 @@ Nothing is irreplaceable.
 
 **Index Regions are fixed-size**, allocated at mkfs. They never grow into
 adjacent regions. Unused space within an IR region is zeroed. As the SMI
-and DHT grow, they expand into the pre-allocated zeroed space.
+and DLI grow, they expand into the pre-allocated zeroed space.
 
 IR3 ends at `last_lba - 1` at maximum. EOP always occupies `last_lba`.
 
@@ -192,7 +192,7 @@ Three Index Regions distributed across the partition:
 - **IR2**: at partition midpoint
 - **IR3**: near partition end (right before EOP)
 
-Each IR = 1 SMI + 1 DHT. Three IRs = three independent copies of SMI+DHT,
+Each IR = 1 SMI + 1 DLI. Three IRs = three independent copies of SMI+DLI,
 physically separated. BH carries the exact LBA of all three IRs.
 
 ---
@@ -222,12 +222,13 @@ Offset  Size    Field           Description
 308     8       ir2_start       u64, LBA of IR2 (fixed at mkfs, never changes)
 316     8       ir3_start       u64, LBA of IR3 (moves left on expansion)
 324     8       ir_size         u64, size of each IR in blocks (all equal, grows on expansion)
-332     8       snap_start      u64, LBA of Snapshot Region
+332     8       snap_start      u64, LBA of Snapshot Region (= ir1_start + ir_size)
 340     8       snap_size       u64, size of Snapshot Region in blocks
-348     8       data_start      u64, LBA of Data Region start
-356     8       total_blocks    u64, total blocks in partition
-364     32      blake3_hash     BLAKE3 of bytes [0..363]
-396     3700    reserved        Must be zero (pad to 4096 bytes)
+348     8       data1_start     u64, LBA of Data Region 1 (= snap_start + snap_size)
+356     8       data2_start     u64, LBA of Data Region 2 (= ir2_start + ir_size)
+364     8       total_blocks    u64, total blocks in partition
+372     32      blake3_hash     BLAKE3 of bytes [0..371]
+404     3692    reserved        Must be zero (pad to 4096 bytes)
 ```
 
 ### Feature Flags
@@ -241,7 +242,10 @@ Bit     Meaning
 3       FEAT_SPARSE         sparse files supported
 4       FEAT_ACL            ACL entries supported
 5       FEAT_XATTR          extended attributes supported
-6-31    Reserved, must be 0
+6       Reserved, must be 0
+7       FS_DIRTY            set before any write, cleared after IR update
+                            if set on mount → IS_COMMITTED scan required
+8-31    Reserved, must be 0
 ```
 
 ---
@@ -264,12 +268,13 @@ Offset  Size    Field           Description
 16      16      fs_uuid         UUID of this partition (matches BH)
 32      8       part_start_lba  u64, LBA of partition start
 40      8       part_end_lba    u64, LBA of partition end (this block)
-48      8       data_start_lba  u64, LBA of Data Region start
-56      8       ir1_lba         u64, LBA of IR1 (hint only)
-64      8       ir2_lba         u64, LBA of IR2 (hint only)
-72      8       ir3_lba         u64, LBA of IR3 (hint only)
-80      32      blake3_hash     BLAKE3 of bytes [0..79]
-112     3952    reserved        Must be 0x00
+48      8       ir1_lba         u64, LBA of IR1 (hint only)
+56      8       ir2_lba         u64, LBA of IR2 (hint only)
+64      8       ir3_lba         u64, LBA of IR3 (hint only)
+72      8       data1_start     u64, LBA of Data Region 1 (hint only)
+80      8       data2_start     u64, LBA of Data Region 2 (hint only)
+88      32      blake3_hash     BLAKE3 of bytes [0..87]
+120     3944    reserved        Must be 0x00
 4064    32      EOP_TAIL        \x00\x00..."END OF RESFS PARTITION"
 ```
 
@@ -294,23 +299,24 @@ On hex dump the last block ends visually as:
 
 2. GPT destroyed → scan last N blocks of each device:
    if block[0..7] == "ResFsEOP":
-     verify BLAKE3([0..79])
+     verify BLAKE3([0..87])
      if valid and fs_uuid matches → EOP found
 
 3. EOP found:
    part_start_lba → partition start
    part_end_lba   → partition end
    ir1/ir2/ir3_lba → hints to locate IR copies
+   data1_start / data2_start → hints for Data Regions
 
 4. Attempt to load BH from part_start_lba:
    if BH valid → use IR locations from BH (authoritative)
    if BH invalid → use IR hints from EOP
 
 5. Attempt to load IR copies:
-   if valid IR found → mount with SMI+DHT
-   if no valid IR → full segment scan from data_start_lba to part_end_lba
+   if valid IR found → mount with SMI+DLI
+   if no valid IR → full segment scan from data1_start to part_end_lba
 
-6. Full segment scan → rebuild SMI+DHT from segments
+6. Full segment scan → rebuild SMI+DLI from segments
    segments are the only truth
 ```
 
@@ -339,7 +345,7 @@ EOP ir_lba hints conflict with BH:
 | Invariant | Status |
 |-----------|--------|
 | segments = only truth about files | ✅ EOP contains no file data |
-| IR = cache only | ✅ EOP is not an IR, contains no SMI/DHT |
+| IR = cache only | ✅ EOP is not an IR, contains no SMI/DLI |
 | no metadata outranks segments | ✅ EOP contains only physical boundaries |
 | EOP is not required | ✅ FS operates fully without EOP |
 
@@ -402,20 +408,39 @@ Bit     Meaning
 14-31   Reserved, must be 0
 ```
 
-**IS_COMMITTED is the CoW commit gate.**
+**IS_COMMITTED is the CoW commit gate. It lives only on SEG 0.**
 
-Writing a new version of a file:
+IS_COMMITTED means: "this file has been written but IR has not yet been
+updated." It is a temporary flag, not a permanent attribute.
+
+Normal state of all files: IS_COMMITTED is NOT set.
+IS_COMMITTED is set only during the window between segment write and IR update.
+
+Write path for any operation (CREATE, WRITE, APPEND, TRUNCATE):
 ```
-1. Write new segment(s) to free block(s) — IS_COMMITTED not set
-2. fsync
-3. Set IS_COMMITTED on new segment(s)     ← atomic commit point
-4. Clear IS_COMMITTED on old segment(s)
-   (or set IS_SNAPSHOT_SEG if snapshotting)
+1. Set FS_DIRTY flag in BH
+2. Write new/changed segment(s) to free blocks
+3. fsync
+4. Verify BLAKE3 of all written segments
+5. Set IS_COMMITTED on SEG 0                 ← atomic commit point
+6. Update IR copies (one by one, verify BLAKE3 after each)
+7. Clear IS_COMMITTED from SEG 0
+8. Clear FS_DIRTY flag in BH
 ```
 
-Power loss before step 3: new segments are invisible. Old version survives.
-Power loss after step 3: new version is live. Old cleaned up by GC.
-No journal. No replay. Deterministic.
+Power loss before step 5: segments invisible → old version survives intact.
+Power loss after step 5, before step 8: IS_COMMITTED on SEG 0 remains.
+
+**Mount with FS_DIRTY=1:**
+```
+1. Scan for SEG 0 segments with IS_COMMITTED set
+2. For each found: update IR with new extents
+3. Clear IS_COMMITTED from SEG 0
+4. Clear FS_DIRTY flag in BH
+5. Mount normally
+```
+
+**Mount with FS_DIRTY=0:** mount immediately, no scan needed.
 
 **IS_LAST_SEG and data_len = 4008:**
 If a file's size is an exact multiple of 4008, the last segment has
@@ -438,8 +463,8 @@ Offset  Size    Field
 65      255     filename        UTF-8, null-padded
 320     4       reserved        Must be 0x00000000
 324     4       permissions     Unix rwxrwxrwx + setuid/setgid/sticky (12 bits)
-328     8       created_at      u64, Unix timestamp (seconds)
-336     8       modified_at     u64, Unix timestamp (seconds)
+328     8       created_at      u64, Unix timestamp nanoseconds
+336     8       modified_at     u64, Unix timestamp nanoseconds
 344     8       owner_uid       u64
 352     8       owner_gid       u64
 360     8       hardlink_id     u64, shared file_id if hardlink, else 0
@@ -629,8 +654,7 @@ ACL types: `ACL_USER = 0x01`, `ACL_GROUP = 0x02`,
 ## Snapshots (Copy-on-Write)
 
 When a segment is modified under an active snapshot, the old segment
-receives `IS_SNAPSHOT_SEG` and a `snapshot_id` reference — it is retained
-and excluded from normal GC until the snapshot is deleted.
+is retained for the snapshot before the new version becomes live.
 
 Snapshot metadata lives in the Snapshot Region (fixed, after IR1):
 
@@ -639,12 +663,31 @@ Offset  Size    Field
 ------  ----    -----
 0       8       SNAP_SIG        "ResFSSNP"
 8       8       snapshot_id     u64
-16      8       created_at      u64, Unix timestamp
+16      8       created_at      u64, Unix timestamp nanoseconds
 24      255     label           UTF-8 human-readable name
 279     8       root_dir_id     file_id of root directory at snapshot time
 287     1       is_deleted      0 = live, 1 = pending GC
 288     32      blake3_hash     BLAKE3 of bytes [0..287]
 ```
+
+### Write Path Under Active Snapshot
+
+When a file is modified and one or more snapshots are active:
+
+```
+1. Set FS_DIRTY in BH
+2. Write new segments to free blocks
+3. fsync + verify BLAKE3
+4. Set IS_SNAPSHOT_SEG on old segments   ← retain for snapshot, before GC can touch them
+5. Set IS_COMMITTED on new SEG 0         ← atomic commit point
+6. Update IR copies
+7. Clear IS_COMMITTED from new SEG 0
+8. Clear FS_DIRTY in BH
+```
+
+Step 4 must happen before step 5 — old segments are marked for
+snapshot retention before the new version becomes live.
+GC never touches IS_SNAPSHOT_SEG segments.
 
 ### Snapshot GC
 
@@ -728,13 +771,38 @@ Offset  Size    Field               Description
 ```
 [SMI HEADER 4KB]
 [ENTRY TABLE: flat array, entry_count × 28B]
-[EXTENT POOL: flat array, entry_count × 24B per file (avg)]
-[zeroed padding to DLI start]
+[EXTENT POOL: flat array, addressed via extent_offset]
+[DLI HEADER 4KB]
+[DLI ENTRY ARRAY: flat array, entry_count × 24B]
+[zeroed padding to end of IR region]
 ```
 
-The boundary between Entry Table and Extent Pool is determined by
-`extent_pool_offset` in the SMI Header. No signatures between regions —
-all addressing is through header offsets.
+The start of DLI is computed from SMI header:
+```
+DLI_start = ir_start + 4096 + entry_count * 28 + extent_count * 24
+            (rounded up to next 4096-byte boundary)
+```
+
+No separate pointer needed — DLI location is always deterministic from SMI.
+
+### SMI Expansion (within IR)
+
+When SMI grows and approaches DLI:
+
+```
+1. Set FS_DIRTY in BH
+2. For IR1:
+   a. Read DLI entirely into memory
+   b. Write expanded SMI (more entries/extents)
+   c. Write DLI at new location (after expanded SMI)
+   d. Verify BLAKE3 of IR1, increment generation
+3. Repeat for IR2
+4. Repeat for IR3
+5. Clear FS_DIRTY in BH
+
+Power loss during step 2: BLAKE3 of IR1 invalid
+  → IR2 and IR3 valid → restore IR1 from them → retry
+```
 
 ### IR Copy Selection (on mount)
 
@@ -744,7 +812,7 @@ all addressing is through header offsets.
 3. Load SMI header from each IR — verify BLAKE3
 4. Discard invalid copies
 5. Among valid copies, choose highest generation number
-6. Load full SMI + DHT from winning IR — verify full BLAKE3
+6. Load full SMI + DLI from winning IR — verify full BLAKE3
 7. Synchronize remaining IR copies to match winner (lazy, background)
 8. Mount
 ```
@@ -755,7 +823,7 @@ all addressing is through header offsets.
 1. Full segment scan of Data Regions
 2. Find all segments by magic "ResFSSEG"
 3. Verify BLAKE3 of each candidate
-4. Filter: IS_COMMITTED set, IS_DELETED not set
+4. Filter: IS_COMMITTED not set, IS_DELETED not set
 5. Group by file_id
 6. Sort each group by seg_index
 7. Build extents from contiguous runs
@@ -763,7 +831,7 @@ all addressing is through header offsets.
 9. file_counter = max_file_id + 1
 10. generation = 1 (or old_max + 1 if any valid partial IR found)
 11. Build used_blocks bitmap from occupied LBAs
-12. Write new SMI + DHT into all three IR regions
+12. Write new SMI + DLI into all three IR regions
 13. Mount
 ```
 
@@ -912,6 +980,8 @@ All three IRs are always identical in size (`ir_size` from BH).
     [zeroed padding]
 ```
 
+DLI start is always computed from SMI header — no separate pointer needed.
+
 ### Initial IR Placement (at mkfs)
 
 ```
@@ -930,7 +1000,7 @@ The buffer zones (~0.5% of disk) around each IR are kept free by
 the allocator when other free space exists elsewhere. They provide
 room for IR expansion without immediate file relocation.
 
-### IR Expansion
+### IR Expansion (TBD — Phase 3)
 
 IRs expand when SMI + DLI approach capacity. All three IRs always
 grow together — `ir_size` is always equal for all three.
@@ -947,33 +1017,26 @@ IR3: ir3_start moves left (decreases), grows leftward
 1. Check free_blocks > RESFS_MIN_FREE (1% of total_blocks)
    if not → RESFS_ERR_NO_SPACE, abort
 
-2. Calculate new_ir_size = ir_size * 2 (double each time)
+2. Set FS_DIRTY in BH
 
-3. For IR1 and IR2: identify blocks in
-   [ir_start + old_ir_size .. ir_start + new_ir_size - 1]
-   Relocate any files occupying those blocks via CoW:
-     a. Allocate new blocks in Data Region
-     b. Write file segments to new blocks (IS_COMMITTED not set)
-     c. fsync
-     d. Set IS_COMMITTED on new segments
-     e. Clear IS_COMMITTED on old segments
+3. For IR1 and IR2: relocate files in new IR space via CoW
+   For IR3: new ir3_start = ir3_start - delta
+            relocate files in [new_ir3_start..old_ir3_start-1] via CoW
 
-4. For IR3: new ir3_start = ir3_start - (new_ir_size - old_ir_size)
-   Relocate files in [new_ir3_start .. old_ir3_start - 1] via CoW
-   (same steps as above)
+4. While relocating, IR1 and IR2 serve reads normally (two copies live)
 
-5. Write expanded SMI + DLI into all three new IR regions
-6. Verify all three IRs (BLAKE3)
-7. Update BH: new ir_size + new ir3_start → recompute BLAKE3 → write BH
+5. Write expanded SMI + DLI into all three new IR regions (one by one)
+   Verify BLAKE3 after each
+
+6. Update BH: new ir_size + new ir3_start → recompute BLAKE3 → write BH
+
+7. Clear FS_DIRTY in BH
+
 8. GC old segment copies (lazy, background)
-
-Power loss before step 7:
-  → BH unchanged → old IR valid → old file copies alive → clean state
-
-Power loss after step 7:
-  → new BH valid → new IRs valid → new file copies committed
-  → old copies cleaned by GC on next mount
 ```
+
+Power loss before step 6: BH unchanged → old IR valid → clean state.
+Power loss after step 6: new BH valid → new IRs valid.
 
 **Capacity limits on 1TB disk:**
 
@@ -983,9 +1046,6 @@ Power loss after step 7:
 | 0.6% (~6GB) | ~76M files |
 | 1.2% (~12GB) | ~152M files |
 
-Expansion doubles ir_size each time. Three IRs total overhead stays
-proportional — at 0.3% initial size, three IRs = 0.9% of disk.
-
 ---
 
 ## Write Path (normative)
@@ -993,73 +1053,85 @@ proportional — at 0.3% initial size, three IRs = 0.9% of disk.
 ResFS is a pure CoW filesystem. No journal. No replay.
 Power loss at any step leaves the filesystem in a consistent state.
 
+All write operations follow the same pattern:
+```
+1. Set FS_DIRTY in BH
+2. Write new/changed segments to free blocks
+3. fsync
+4. Verify BLAKE3 of all written segments
+5. Set IS_COMMITTED on SEG 0              ← atomic commit point
+6. Update IR copies (one by one, BLAKE3 verify after each)
+7. Clear IS_COMMITTED from SEG 0
+8. Clear FS_DIRTY in BH
+```
+
 ### CREATE
 
 ```
-1. counter = atomic_increment(smi.file_counter)
-   new file_id = counter
-2. Write segment(s) to free blocks in Data Region
-   IS_COMMITTED not set
-3. fsync
-4. Set IS_COMMITTED on new segment(s)        ← atomic commit point
-5. Update SMI: add file_id → extents
-6. Write new directory segment (CoW: new SEG for parent dir)
-   Set IS_COMMITTED on new dir segment
-   Clear IS_COMMITTED on old dir segment
-7. Update DLI: insert (parent_dir_id, name) → file_id
-
-Power loss before step 4:
-  → segments not committed → invisible → clean state
-
-Power loss after step 4:
-  → file exists and is recoverable
-  → SMI/DLI stale → rebuilt from scan on next mount
+1. Set FS_DIRTY in BH
+2. counter = atomic_increment(smi.file_counter) → new file_id
+3. Write all segments to free blocks (IS_COMMITTED not set on SEG 0)
+4. fsync + verify BLAKE3
+5. Set IS_COMMITTED on SEG 0              ← atomic commit point
+6. Update SMI: add file_id → extents
+7. Write new directory segment (CoW)
+8. Update DLI: insert (parent_dir_id, name) → file_id
+9. Clear IS_COMMITTED from SEG 0
+10. Clear FS_DIRTY in BH
 ```
 
 ### WRITE / APPEND
 
 ```
-1. Write new segment(s) to free blocks (IS_COMMITTED not set)
-2. fsync
-3. Set IS_COMMITTED on new segment(s)        ← atomic commit point
-4. Clear IS_COMMITTED on old segment(s)
-   (or set IS_SNAPSHOT_SEG if under active snapshot)
+1. Set FS_DIRTY in BH
+2. Write new/changed segments to free blocks
+3. fsync + verify BLAKE3
+4. Set IS_COMMITTED on SEG 0              ← atomic commit point
 5. Update SMI extents
+6. Clear IS_COMMITTED from SEG 0
+7. Clear FS_DIRTY in BH
 
-Power loss before step 3:
-  → new segments invisible → old version survives intact
+Old segments → GC (lazy, background)
+```
 
-Power loss after step 3:
-  → new version live
-  → old segments cleaned by GC on next mount
+### TRUNCATE
+
+```
+1. Set FS_DIRTY in BH
+2. Update SMI extents (remove extents beyond new size)
+3. Update file_size in SEG 0 (via CoW if needed)
+4. Set IS_COMMITTED on SEG 0
+5. Write updated IR
+6. Clear IS_COMMITTED from SEG 0
+7. Clear FS_DIRTY in BH
+
+Removed segments → GC (lazy, background)
+Truncation is block-level — no zeroing of partial last segment.
 ```
 
 ### DELETE
 
 ```
-1. Set IS_DELETED on SEG 0 of file           ← atomic commit point
+1. Set IS_DELETED on SEG 0               ← atomic commit point
 2. Remove DLI entry
 3. SMI cleanup deferred to resfs-gc
 
-Power loss after step 1:
-  → file is deleted (IS_DELETED on SEG 0 is authoritative)
-  → DLI/SMI stale → rebuilt correctly on next mount
+IS_DELETED on SEG 0 is authoritative — file is deleted.
+DLI/SMI stale → rebuilt correctly on next mount.
 ```
 
 ### RENAME
 
 ```
-1. Write new directory segment (CoW): old entry tombstoned, new entry added
-2. Set IS_COMMITTED on new dir segment       ← atomic commit point
-3. Clear IS_COMMITTED on old dir segment
+1. Set FS_DIRTY in BH
+2. Write new directory segment (CoW): old entry tombstoned, new entry added
+3. Set IS_COMMITTED on new dir segment   ← atomic commit point
 4. Update DLI: remove old entry, insert new entry
+5. Clear IS_COMMITTED from dir SEG 0
+6. Clear FS_DIRTY in BH
 
-Power loss before step 2:
-  → new dir segment not committed → old name survives
-
-Power loss after step 2:
-  → new name committed
-  → DHT stale → rebuilt from directory segments
+Power loss before step 3: old name survives.
+Power loss after step 3: new name committed, DLI rebuilt from dir segments.
 ```
 
 ---
@@ -1147,12 +1219,18 @@ GC runs:
 
 ```
 1. Read BH at LBA 0 — verify BLAKE3
-2. Locate IR1, IR2, IR3 from BH
-3. Load SMI header from each IR — verify BLAKE3
-4. Select IR with highest valid generation
-5. Load full SMI + DHT from winning IR — verify full BLAKE3
-6. Build free space bitmap from SMI extents
-7. Mount
+2. Check FS_DIRTY flag:
+   if FS_DIRTY=0 → proceed to step 3
+   if FS_DIRTY=1 → scan for SEG 0 with IS_COMMITTED
+                   update IR for each found
+                   clear IS_COMMITTED
+                   clear FS_DIRTY
+3. Locate IR1, IR2, IR3 from BH
+4. Load SMI header from each IR — verify BLAKE3
+5. Select IR with highest valid generation
+6. Load full SMI + DLI from winning IR — verify full BLAKE3
+7. Build free space bitmap from SMI extents
+8. Mount
 ```
 
 ### BH Lost or Corrupted
@@ -1171,7 +1249,7 @@ GC runs:
 
 ```
 Layer 1 — valid IR exists:
-  Load SMI+DHT from best IR
+  Load SMI+DLI from best IR
   Mount immediately
   → seconds
 
@@ -1179,7 +1257,7 @@ Layer 2 — all IRs destroyed:
   Full O(n) scan of Data Region
   Find all segments by "ResFSSEG" magic
   Group by file_id, sort by seg_index
-  Reconstruct files, rebuild SMI+DHT
+  Reconstruct files, rebuild SMI+DLI
   → slow but deterministic, always succeeds if segments are intact
 ```
 
@@ -1201,7 +1279,7 @@ After scan:
 7. Group segments by file_id
 8. Sort each group by seg_index
 9. Build extents from contiguous LBA runs
-10. Reconstruct SMI and DHT
+10. Reconstruct SMI and DLI
 11. Mount
 ```
 
@@ -1248,7 +1326,7 @@ struct resfs_recovery_info {
 | Tool              | Function                                             |
 |-------------------|------------------------------------------------------|
 | `mkfs.resfs`      | Format partition: write BH, IR1/2/3, EOP            |
-| `resfs-mount`     | Mount via FUSE (Linux) or macFUSE (macOS)            |
+| `resfs-mount`     | Mount via platform VFS adapter (RhCOS, custom kernel) |
 | `resfs-recover`   | Full disk scan → reconstruct all files               |
 | `resfs-verify`    | Verify BLAKE3 integrity of all segments              |
 | `resfs-visualize` | ASCII visualization of segment and free space layout |
@@ -1282,8 +1360,8 @@ mode 2 — recovery container:
 | Routers / cameras   | ✅         | Configs, logs, small files          |
 | Desktop             | ✅         | CoW makes it fully viable           |
 | Server              | ✅         | CoW + snapshots                     |
-| Linux               | ✅         | Via FUSE mount                      |
-| macOS Intel         | ✅         | Via macFUSE                         |
+| Linux               | ✅         | Via platform adapter or kernel module |
+| macOS Intel         | ✅         | Via platform adapter                  |
 | macOS Apple Silicon | ⚠️          | Requires disabling Secure Boot      |
 | Windows             | ✅         | Via WinFSP                          |
 | RhCOS               | ✅ Target  | libresfs portable, no OS deps       |
@@ -1303,42 +1381,47 @@ mode 2 — recovery container:
 - [ ] CoW write path: IS_COMMITTED as atomic gate
 - [ ] Root directory: file_id=1, RESFS_ROOT signature
 - [ ] SMI: on-disk format, read, write, rebuild from segments
-- [ ] DHT: on-disk format, read, write, rebuild from directory segments
+- [ ] DLI: on-disk format, read, write, rebuild from directory segments
 - [ ] IR copy selection: highest valid generation wins
 - [ ] Free space bitmap: build from SMI extents on mount
 - [ ] GC: lazy dead segment collection
-- [ ] Recovery: full disk scan → rebuild SMI+DHT → mount
+- [ ] Recovery: full disk scan → rebuild SMI+DLI → mount
 - [ ] `resfs-recover` proof of concept on disk.img
 - [ ] Corruption test suite: random corruption, kill -9, partial writes
 
-### Phase 2 — POSIX-ish API + Mount Simulator
-
-**Criterion: full disk scan → rebuild FS → mount → read all files**
-
-- [ ] `open()`, `read()`, `write()`, `readdir()` over libresfs
-- [ ] CLI mount simulator (no kernel required)
-- [ ] `resfs-visualize` ASCII segment map
-- [ ] Benchmark vs ext4
-
-### Phase 3 — Advanced Features
+### Phase 2 — Advanced Features
 
 - [ ] xattr full implementation
 - [ ] ACL full implementation
 - [ ] Snapshot management + GC
 - [ ] Sparse file full implementation
+- [ ] Defragmenter (resfs-defrag):
+  - threshold: 8 extents → file in queue
+  - queue in memory, rebuilt at mount from SMI
+  - background, low priority
+  - if file opened for writing during defrag → cancel, move to end of queue
+- [ ] POSIX adapter (optional layer over native libresfs API):
+  - open() / read() / write() / close() / stat() / readdir()
+  - translates POSIX calls to native libresfs API
+  - enables standard Unix tools and Linux compatibility
+  - RhCOS uses native API directly, POSIX layer is opt-in
 
-### Phase 4 — FUSE Bridge
+### Phase 3 — RhK Integration
 
-- [ ] `resfs-mount` via libfuse / macFUSE
-- [ ] Bridge between POSIX API and kernel VFS
+- [ ] virtio-blk driver (QEMU)
+- [ ] resfs_platform_t for RhCOS
+- [ ] VFS layer: open/read/write/readdir/close
+- [ ] resfs_vfs adapter over libresfs
+- [ ] Mount ResFS partition at kernel boot
 
-### Phase 5 — Kernel FS
+### Phase 4 — Open Source Release
 
-- [ ] Segment reader/writer in kernel space
-- [ ] SMI rebuild logic in kernel
-- [ ] Directory resolution in kernel VFS
-- [ ] Power-loss atomicity testing
-- [ ] Bare metal port (no OS dependency in libresfs)
+- [ ] SPEC.md v1.4 finalized ← YOU ARE HERE
+- [ ] libresfs complete and tested
+- [ ] `resfs-recover` demo: wipe GPT → full recovery
+- [ ] Publish `resfs` repo
+- [ ] Submit GUID to gdisk partition type database
+- [ ] Hacker News / r/osdev launch
 
 ---
 
@@ -1381,7 +1464,7 @@ IS_SPARSE_SEG. Partial recovery policy. Orphan segment policy.
 Superblock removed (erroneously added, not part of design).
 Journal removed — ResFS is pure CoW. Bootstrap Header introduced.
 Disk layout corrected: BH + IR1/IR2/IR3 distributed across partition.
-Each IR = 1 SMI + 1 DHT. BH carries fs_uuid, fs_label, IR locations.
+Each IR = 1 SMI + 1 DLI. BH carries fs_uuid, fs_label, IR locations.
 SMI header carries file_counter, used_blocks. CoW write path formalized.
 
 ### v1.2
@@ -1407,9 +1490,42 @@ SMI header carries file_counter, used_blocks. CoW write path formalized.
 - ACL subject_id: 16B → 8B (aligned with u64 file_id)
 - Snapshot region: fixed location after IR1, snap_size in BH
 
+### v1.3
+- BH magic: "RESFS PARTITION " (16 bytes, replaces "ResFSBH0")
+- BH size: 4096 bytes (one full block)
+- SMI/DLI header size: 4096 bytes each
+- SMI Entry: 64B → 28B (removed all reserved fields)
+- Extent: 32B → 24B (removed 8B reserved)
+- DHT → DLI (Directory List Index) throughout
+- DLI redesigned: sorted array + binary search (replaces bucket table)
+- DLI Entry: 24B (name_hash + parent_dir_id + file_id)
+- BH: data1_start + data2_start + snap_start (replaces data_start)
+- EOP: data1_start + data2_start (replaces data_start_lba)
+- IR expansion algorithm introduced (TBD — Phase 3)
+- IR size: 0.3% initial, expandable
+
+### v1.4
+- GUID updated: RESFILESYSTEM/AK (52455346-494C-4553-5953-54454D2F414B)
+- IS_COMMITTED semantics redesigned: only on SEG 0, temporary flag
+  meaning "written but IR not yet updated" — not a permanent attribute
+- FS_DIRTY flag added to BH feature_flags (bit 7):
+  set before any write, cleared after IR update
+  mount with FS_DIRTY=1 → scan for IS_COMMITTED SEG 0 → update IR
+- CoW write path rewritten: unified algorithm for all operations
+- TRUNCATE formalized: block-level, SMI extents update, GC handles rest
+- created_at / modified_at: seconds → nanoseconds (u64)
+- SMI expansion mechanism: DLI shifts right when SMI grows
+  DLI start always computed from SMI header offsets
+- Defragmenter (resfs-defrag) introduced:
+  threshold 8 extents → file in queue
+  background, lazy, cancels gracefully if file opened for writing
+- Phase 2 (POSIX API) and Phase 4 (FUSE) removed from roadmap
+- Roadmap restructured: Phase 1 libresfs → Phase 2 Advanced →
+  Phase 3 RhK Integration → Phase 4 Open Source Release
+
 ---
 
-*ResFS Specification v1.2*
+*ResFS Specification v1.4*
 
 *Author: Andrei Kovalenko*
 
