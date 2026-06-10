@@ -1,4 +1,4 @@
-# <img width="100" alt="image" src="https://github.com/user-attachments/assets/c9ec4f1c-599d-4147-9845-7cffec655719" /> Specification v1.5
+# <img width="200" alt="image" src="https://github.com/user-attachments/assets/c9ec4f1c-599d-4147-9845-7cffec655719" /> Specification v1.5
 > Recovery-First Filesystem — every physically intact segment is recoverable,
 > deterministically, without heuristics, even if all metadata is destroyed.
 
