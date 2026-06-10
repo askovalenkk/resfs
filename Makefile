@@ -1,1 +1,1 @@
-
+CFLAGS = -Ilibresfs/include
