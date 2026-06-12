@@ -1,3 +1,8 @@
+/*
+*  resfs/libresfs/vendor/blake3_portable.c
+*  SPDX-License-Identifier: CC0
+*/
+
 #include "blake3_impl.h"
 #include <string.h>
 
