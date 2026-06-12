@@ -1,3 +1,8 @@
+/*
+*  resfs/libresfs/vendor/blake3.c
+*  SPDX-License-Identifier: CC0
+*/
+
 #include <assert.h>
 #include <stdbool.h>
 #include <string.h>
