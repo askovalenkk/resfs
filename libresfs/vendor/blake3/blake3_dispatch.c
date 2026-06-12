@@ -1,3 +1,8 @@
+/*
+*  resfs/libresfs/vendor/blake3_dispatch.c
+*  SPDX-License-Identifier: CC0
+*/
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
