@@ -1764,4 +1764,4 @@ SMI header carries file_counter, used_blocks. CoW write path formalized.
 
 *Author: Andrei Kovalenko*
 
-*License: PGSL-NC*
+*License: GNU GPL v2.0*
