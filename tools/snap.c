@@ -1,5 +1,5 @@
 /*
 *  resfs/tools/snap.c
-*  License – PetalSoft General Non-commercial Software License (PGSL-NC)
+*  SPDX-License-Identifier: MIT
 *  Copyright (c) 2026 Andrei Kovalenko
 */
