@@ -1,3 +1,8 @@
+/*
+*  resfs/libresfs/vendor/blake3.h
+*  SPDX-License-Identifier: CC0
+*/
+
 #ifndef BLAKE3_H
 #define BLAKE3_H
 
