@@ -1,0 +1,14 @@
+*.o
+*.a
+*.so
+*.log
+*.tmp
+*.img
+*.iso
+*.out
+build/
+dist/
+*.img
+.vscode/
+.idea/
+.DS_Store
