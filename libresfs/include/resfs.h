@@ -29,12 +29,6 @@
 #define FEAT_ACL (1u << 4)
 #define FEAT_XATTR (1u << 5)
 
-#define 
-#define 
-#define 
-#define 
-
-
 #define __packed __attribute__((packed))
 
 struct resfs_bh {
@@ -55,11 +49,10 @@ struct resfs_bh {
 	uint64_t snap_size;
 	uint64_t data1_start;
 	uint64_t data2_start;
-	uint64_t total_blocks;
-	uint8_t blake3_hash[32];
 	uint64_t start_of_partition_lba;
 	uint64_t partition_size;
-	uint8_t reserved[3548];
+	uint8_t blake3_hash[32];
+	uint8_t reserved[3668];
 } __packed;
 
 _Static_assert(sizeof(struct resfs_bh) == 4096, "resfs_bh must be 4096 bytes");
@@ -82,13 +75,12 @@ struct resfs_eop {
 	uint64_t snap_size;
 	uint64_t data1_start;
 	uint64_t data2_start;
-	uint64_t total_blocks;
+	uint64_t start_of_partition_lba;
+	uint64_t partition_size;
 	uint8_t blake3_hash[32];
-	uint8_t reserved[3534];
+	uint8_t reserved[3654];
 	uint8_t eop_tail[22];
 } __packed;
-
-
 
 _Static_assert(sizeof(struct resfs_eop) == 4096, "resfs_eop must be 4096 bytes");
 

@@ -242,11 +242,10 @@ Offset  Size    Field              Description
 356     8       snap_size          u64, size of Snapshot Region in blocks
 364     8       data1_start        u64, LBA of Data Region 1 (= snap_start + snap_size)
 372     8       data2_start        u64, LBA of Data Region 2 (= ir2_start + ir_size)
-380     8       total_blocks       u64, total blocks in partition
-388     32      blake3_hash        BLAKE3 of bytes [0..387]
-420     64      start_of_partition u64, Absolute LBA of the first segment
-484     64      partition_size     u64, Partition size in blocks
-548     3548    reserved           Must be zero (pad to 4096 bytes)
+380     8       start_of_partition u64, Absolute LBA of the first segment
+388     8       partition_size     u64, Partition size in blocks
+396     32      blake3_hash        BLAKE3 of bytes [0..387]
+428     3668    reserved           Must be zero (pad to 4096 bytes)
 
 ```
 
@@ -318,11 +317,10 @@ Offset  Size    Field           Description
 348     8       snap_size          u64, size of Snapshot Region in blocks
 356     8       data1_start        u64, LBA of Data Region 1 (= snap_start + snap_size)
 364     8       data2_start        u64, LBA of Data Region 2 (= ir2_start + ir_size)
-372     8       total_blocks       u64, total blocks in partition
-380     32      blake3_hash        BLAKE3 of bytes [0..387]
-412     64      start_of_partition u64, Absolute LBA of the first segment
-476     64      partition_size     u64, Partition size in blocks
-540     3534    reserved           Must be zero (pad to 40 bytes)
+372     8       start_of_partition u64, Absolute LBA of the first segment
+380     8       partition_size     u64, Partition size in blocks
+388     32      blake3_hash        BLAKE3 of bytes [0..387]
+420     3654    reserved           Must be zero (pad to 40 bytes)
 4074    22      EOP_TAIL           "END OF RESFS PARTITION"
 ```
 
