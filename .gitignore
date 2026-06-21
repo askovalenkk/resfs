@@ -6,11 +6,13 @@
 *.img
 *.iso
 *.out
+*.gch
+*.img
+test.c
+notes.md
 build/
 dist/
-*.img
 .vscode/
+.obsidian/
 .idea/
 .DS_Store
-test.c
-*.gch

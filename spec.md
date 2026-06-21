@@ -1,4 +1,4 @@
-<img width="1016" height="110" alt="image" src="https://github.com/user-attachments/assets/7fbe072b-5b36-40dc-a12b-d2571719f9b4" />
+<img width="1016" height="110" alt="ResFS Specification v1.5" src="https://github.com/user-attachments/assets/7fbe072b-5b36-40dc-a12b-d2571719f9b4" />
 
 > Recovery-First Filesystem — every physically intact segment is recoverable, deterministically, without heuristics, even if all metadata is destroyed.
 
@@ -260,10 +260,7 @@ Bit     Meaning
 3       FEAT_SPARSE         sparse files supported
 4       FEAT_ACL            ACL entries supported
 5       FEAT_XATTR          extended attributes supported
-6       Reserved, must be 0
-7       FS_DIRTY            set before any write, cleared after IR update
-                            if set on mount → WIR-guided dirty mount procedure
-8-31    Reserved, must be 0
+6-31    Reserved, must be 0
 ```
 
 ### Initial Layout Calculation (at mkfs)
@@ -419,14 +416,13 @@ affects speed, never correctness.
 Offset  Size    Field           Description
 ------  ----    -----           -----------
 0       8       WIR_SIG         Magic: "ResFSWIR"
-8       4       version         u32
-12      4       reserved        u32, must be 0
-16      8       generation      u64, incremented on each WIR write
-24      8       entry_count     u64, number of active entries
-32      8       capacity        u64, maximum entries (computed from wir_size)
-40      8       data_offset     u64, byte offset to offset table (relative to WIR start)
-48      32      blake3_hash     BLAKE3 of entire WIR body (header + table + entries)
-80      4016    reserved        pad to 4096 bytes
+8       4       reserved        u32, must be 0
+12      8       generation      u64, incremented on each WIR write
+20      8       entry_count     u64, number of active entries
+28      8       capacity        u64, maximum entries (computed from wir_size)
+36      8       data_offset     u64, byte offset to offset table (relative to WIR start)
+44      32      blake3_hash     BLAKE3 of entire WIR body (header + table + entries)
+76      4020    reserved        pad to 4096 bytes
 ```
 
 ### WIR Offset Table
@@ -444,7 +440,8 @@ each entry: u64 byte offset of a WIR Entry (relative to WIR Region start)
 Offset  Size            Field       Description
 ------  ----            -----       -----------
 0       8               file_id     u64
-8       4               operation   u32, see WIR Operations
+8       1               flags       u8, see WIR Operations
+9       3               reserved    must be 0
 12      4               ext_count   u32, number of new extents
 16      ext_count × 24  extents     new extents (same format as SMI Extent)
 ```
@@ -520,11 +517,12 @@ Offset  Size    Field           Description
 28      4       reserved        Must be 0x00000000
 32      8       file_size       u64, total file size in bytes
                                 (0 for IS_DIRECTORY)
-40      32      blake3_hash     BLAKE3-256 of data region [64..4071]
+40      8       snapshot_id     u64, 
+48      32      blake3_hash     BLAKE3-256 of data region [64..4071]
 
 === DATA REGION (4008 bytes) ===
 
-64      4008    data            Raw file data (or file header for SEG 0)
+80      3996    data            Raw file data (or file header for SEG 0)
 
 === FOOTER (24 bytes) ===
 

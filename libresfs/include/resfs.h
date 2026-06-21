@@ -84,4 +84,17 @@ struct resfs_eop {
 
 _Static_assert(sizeof(struct resfs_eop) == 4096, "resfs_eop must be 4096 bytes");
 
+struct resfs_wir_h {
+	uint8_t wir_sig[8];
+	uint32_t reserved1;
+	uint64_t generation;
+	uint64_t entry_count;
+	uint64_t entry_size;
+	uint64_t data_offset;
+	uint8_t blake3_hash[32];
+	uint8_t reserved2[4020];
+} __packed;
+
+_Static_assert(sizeof(struct resfs_wir_h) == 4096, "resfs_wir_h must be 4096 bytes");
+
 #endif /* RESFS_H */
