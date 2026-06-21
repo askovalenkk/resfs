@@ -12,3 +12,5 @@ dist/
 .vscode/
 .idea/
 .DS_Store
+test.c
+*.gch

@@ -1,7 +1,6 @@
 <img width="1016" height="110" alt="image" src="https://github.com/user-attachments/assets/7fbe072b-5b36-40dc-a12b-d2571719f9b4" />
 
-> Recovery-First Filesystem — every physically intact segment is recoverable,
-> deterministically, without heuristics, even if all metadata is destroyed.
+> Recovery-First Filesystem — every physically intact segment is recoverable, deterministically, without heuristics, even if all metadata is destroyed.
 
 ## What ResFS Is (and Is Not)
 
@@ -107,9 +106,9 @@ the new segment is fully committed. If power is lost mid-write, the old
 version survives intact. IS_COMMITTED is the atomic commit gate.
 
 ```
-Old segment (IS_COMMITTED) → still valid, still readable
+Old segment → still valid, still readable
 New segment being written  → IS_COMMITTED not yet set → invisible to FS
-Power loss here            → old version survives, new is discarded on next mount
+Power loss here            → old version survives, new never existed for FS
 New segment gets IS_COMMITTED → new version visible, old is superseded
 ```
 
@@ -190,7 +189,7 @@ Nothing is irreplaceable.
   [partition midpoint]  Index Region 2 (IR2) — fixed size, allocated at mkfs
   [continued]           Data Region 2 (segments, continued)
   [near end]            Index Region 3 (IR3) — fixed size, allocated at mkfs
-  [last block]          End Of Partition marker (EOP)
+  [last block]          End Of Partition segment (EOP)
 ```
 
 **WIR Region is fixed-size**, allocated at mkfs immediately after BH.
@@ -224,28 +223,31 @@ IR update. All other BH fields change only on structural events
 once and remain stable for the lifetime of the partition.
 
 ```
-Offset  Size    Field           Description
-------  ----    -----           -----------
-0       16      BH_SIG          Magic: "RESFS PARTITION "
-16      4       version         u32, format version (1)
-20      4       block_size      u32, always 4096
-24      16      fs_uuid         UUID of this filesystem instance
-40      1       label_len       u8, length of fs_label
-41      255     fs_label        UTF-8 filesystem label, null-padded
-296     4       feature_flags   u32, see Feature Flags section
-300     8       wir_start       u64, LBA of WIR Region (always 1)
-308     8       wir_size        u64, size of WIR Region in blocks
-316     8       ir1_start       u64, LBA of IR1 (fixed at mkfs, never changes)
-324     8       ir2_start       u64, LBA of IR2 (fixed at mkfs, never changes)
-332     8       ir3_start       u64, LBA of IR3 (moves left on expansion)
-340     8       ir_size         u64, size of each IR in blocks (all equal, grows on expansion)
-348     8       snap_start      u64, LBA of Snapshot Region (= ir1_start + ir_size)
-356     8       snap_size       u64, size of Snapshot Region in blocks
-364     8       data1_start     u64, LBA of Data Region 1 (= snap_start + snap_size)
-372     8       data2_start     u64, LBA of Data Region 2 (= ir2_start + ir_size)
-380     8       total_blocks    u64, total blocks in partition
-388     32      blake3_hash     BLAKE3 of bytes [0..387]
-420     3676    reserved        Must be zero (pad to 4096 bytes)
+Offset  Size    Field              Description
+------  ----    -----              -----------
+0       16      BH_SIG             Magic: "RESFS PARTITION "
+16      4       version            u32, format version (1)
+20      4       block_size         u32, always 4096
+24      16      fs_uuid            UUID of this filesystem instance
+40      1       label_len          u8, length of fs_label
+41      255     fs_label           UTF-8 filesystem label, null-padded
+296     4       feature_flags      u32, see Feature Flags section
+300     8       wir_start          u64, LBA of WIR Region (always 1)
+308     8       wir_size           u64, size of WIR Region in blocks
+316     8       ir1_start          u64, LBA of IR1 (fixed at mkfs, never changes)
+324     8       ir2_start          u64, LBA of IR2 (fixed at mkfs, never changes)
+332     8       ir3_start          u64, LBA of IR3 (moves left on expansion)
+340     8       ir_size            u64, size of each IR in blocks (all equal, grows on expansion)
+348     8       snap_start         u64, LBA of Snapshot Region (= ir1_start + ir_size)
+356     8       snap_size          u64, size of Snapshot Region in blocks
+364     8       data1_start        u64, LBA of Data Region 1 (= snap_start + snap_size)
+372     8       data2_start        u64, LBA of Data Region 2 (= ir2_start + ir_size)
+380     8       total_blocks       u64, total blocks in partition
+388     32      blake3_hash        BLAKE3 of bytes [0..387]
+420     64      start_of_partition u64, Absolute LBA of the first segment
+484     64      partition_size     u64, Partition size in blocks
+548     3548    reserved           Must be zero (pad to 4096 bytes)
+
 ```
 
 ### Feature Flags
@@ -299,27 +301,29 @@ boundaries are unknown. It is not required for normal operation.
 ```
 Offset  Size    Field           Description
 ------  ----    -----           -----------
-0       8       EOP_SIG         Magic: "ResFSEOP"
-8       4       version         u32 = 1
-12      4       block_size      u32 = 4096
-16      16      fs_uuid         UUID of this partition (matches BH)
-32      8       part_start_lba  u64, LBA of partition start
-40      8       part_end_lba    u64, LBA of partition end (this block)
-48      8       wir_start       u64, LBA of WIR Region (hint only)
-56      8       wir_size        u64, size of WIR Region in blocks (hint only)
-64      8       ir1_lba         u64, LBA of IR1 (hint only)
-72      8       ir2_lba         u64, LBA of IR2 (hint only)
-80      8       ir3_lba         u64, LBA of IR3 (hint only)
-88      8       data1_start     u64, LBA of Data Region 1 (hint only)
-96      8       data2_start     u64, LBA of Data Region 2 (hint only)
-104     32      blake3_hash     BLAKE3 of bytes [0..103]
-136     3928    reserved        Must be 0x00
-4064    32      EOP_TAIL        \x00\x00..."END OF RESFS PARTITION"
-```
-
-EOP_TAIL layout (32 bytes):
-```
-[10 bytes: 0x00] ["END OF RESFS PARTITION"]
+0       8       EOP_SIG            Magic: "ResFSEOP"
+8       4       version            u32, format version (1)
+12      4       block_size         u32, always 4096
+16      16      fs_uuid            UUID of this filesystem instance
+32      1       label_len          u8, length of fs_label
+33      255     fs_label           UTF-8 filesystem label, null-padded
+288     4       feature_flags      u32, see Feature Flags section
+292     8       wir_start          u64, LBA of WIR Region (always 1)
+300     8       wir_size           u64, size of WIR Region in blocks
+308     8       ir1_start          u64, LBA of IR1 (fixed at mkfs, never changes)
+316     8       ir2_start          u64, LBA of IR2 (fixed at mkfs, never changes)
+324     8       ir3_start          u64, LBA of IR3 (moves left on expansion)
+332     8       ir_size            u64, size of each IR in blocks (all equal, grows on expansion)
+340     8       snap_start         u64, LBA of Snapshot Region (= ir1_start + ir_size)
+348     8       snap_size          u64, size of Snapshot Region in blocks
+356     8       data1_start        u64, LBA of Data Region 1 (= snap_start + snap_size)
+364     8       data2_start        u64, LBA of Data Region 2 (= ir2_start + ir_size)
+372     8       total_blocks       u64, total blocks in partition
+380     32      blake3_hash        BLAKE3 of bytes [0..387]
+412     64      start_of_partition u64, Absolute LBA of the first segment
+476     64      partition_size     u64, Partition size in blocks
+540     3534    reserved           Must be zero (pad to 40 bytes)
+4074    22      EOP_TAIL           "END OF RESFS PARTITION"
 ```
 
 On hex dump the last block ends visually as:
@@ -1635,12 +1639,11 @@ mode 2 — recovery container:
 
 ### Phase 4 — Open Source Release
 
-- [ ] SPEC.md v1.5 finalized ← YOU ARE HERE
 - [ ] libresfs complete and tested
 - [ ] `resfs-recover` demo: wipe GPT → full recovery
-- [ ] Publish `resfs` repo
+- [ ] Public `resfs` repo
 - [ ] Submit GUID to gdisk partition type database
-- [ ] Hacker News / r/osdev launch
+- [ ] Submit PR to linux/fs
 
 ---
 
