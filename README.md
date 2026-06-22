@@ -11,21 +11,36 @@ ResFS is a file system which has no inode table or superblock. ResFS disk partit
 ResFS uses CoW (Copy-on-Write) algorithm for write operations and a log, called WIA (Write Intent Array) which helps the mount algorithm to find any aborted operations in crash recovery conditions. 
 
 ## ResFS Disk Partition Layout
-```ResFS Partition
-[Bootstrap Header (BH)]
-[Write Intent Array (WIA)]
-[Snapshot Region (SR)]
-[Index Region 1 (IR1)]
-[IR1 expansion buffer]
-
-[DATA REGION 1]
-
-[Index Region 2 (IR2)]
-[IR2 expansion buffer]
-
-[DATA REGION 2]
-
-[IR3 expansion buffer]
-[Index Region 3 (IR3)]
-[End of Partition Segment (EOP)]
+```
+┌───────────────────────────────────────────┐
+│           Bootstrap Header (BH)           │ 
+├───────────────────────────────────────────┤
+│         Write Intent Array (WIA)          │ 
+├───────────────────────────────────────────┤
+│           Snapshot Region (SR)            │
+├───────────────────────────────────────────┤
+│           Index Region 1 (IR1)            │
+├───────────────────────────────────────────┤
+│                                           │
+│                                           │
+│                                           │
+│              DATA REGION 1                │
+│                                           │
+│                                           │
+│                                           │
+├───────────────────────────────────────────┤
+│            Index Region 2 (IR2)           │
+├───────────────────────────────────────────┤
+│                                           │
+│                                           │
+│                                           │
+│              DATA REGION 2                │
+│                                           │
+│                                           │
+│                                           │
+├───────────────────────────────────────────┤
+│            Index Region 3 (IR3)           │
+├───────────────────────────────────────────┤
+│       End of Partition Segment (EOP)      │
+└───────────────────────────────────────────┘
 ```
