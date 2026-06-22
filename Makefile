@@ -2,4 +2,29 @@
 #  SPDX-License-Identifier: MIT
 #  Copyright (c) 2026 Andrei Kovalenko
 
-CFLAGS = -Ilibresfs/include
+CC = gcc
+CFLAGS = -Ilibresfs/include -Ilibresfs/vendor/blake3 -Wall -Wextra -g
+
+LIB_SRCS = $(wildcard libresfs/src/*.c) $(wildcard libresfs/vendor/blake3/*.c)
+LIB_OBJS = $(LIB_SRCS:.c=.o)
+
+TOOLS = tools/mkfs tools/verify tools/recover tools/snap tools/gc
+
+all: libresfs.a $(TOOLS)
+
+libresfs.a: $(LIB_OBJS)
+	ar rcs $@ $^
+
+tools/%: tools/%.c libresfs.a
+	$(CC) $(CFLAGS) $< -L. -lresfs -o $@
+
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+test: libresfs/src/test.c
+	$(CC) $(CFLAGS) $< -o /dev/null
+
+clean:
+	rm -f $(LIB_OBJS) libresfs.a $(TOOLS)
+
+.PHONY: all test clean
