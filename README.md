@@ -5,4 +5,5 @@ Recovery-First File System (ResFS) is a file system in which every physically ex
 ![Status](https://img.shields.io/badge/status-active-green)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
-# TBD
+## What is ResFS?
+ResFS is a 
