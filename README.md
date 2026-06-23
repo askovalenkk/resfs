@@ -10,6 +10,15 @@ ResFS is a file system which has no inode table or superblock. ResFS disk partit
 
 ResFS uses CoW (Copy-on-Write) algorithm for write operations and a log, called WIA (Write Intent Array) which helps the mount algorithm to find any aborted operations in crash recovery conditions. 
 
+# Documentation
+Official documentation of ResFS:
+
+- [ResFS Specification](spec.md)
+
+- [MIT License](LICENSE)
+
+- ResFS Wiki (TBD)
+
 # ResFS Disk Partition Layout
 
 ```
