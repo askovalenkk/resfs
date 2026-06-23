@@ -44,7 +44,9 @@ Write Intent Array is an operation log which allows the mount operation to detec
 Index Region is a metadata acceleration structure which allows the FS to quickly locate file segments without scanning the entire disk. ResFS maintains three independent Index Region copies (IR1, IR2, IR3) distributed across the partition (IR1 is located at the start of partition, IR2 in the midpoint and IR3 in the end of partition). All three are kept in sync after every write operation using a sequential FIFO update order (IR1 → IR2 → IR3), which guarantees that at least one copy always contains consistent metadata even in case of a crash during IR update.
 
 Each Index Region consists of two tables:
+
 **Segment Map Index (SMI)** — maps every file ID to its extents on disk. SMI is the primary structure used to locate file data during read operations.
+
 **Directory Lookup Index (DLI)** — maps file and directory names to their file IDs. DLI enables fast path lookup without traversing directory segments on disk.
 
 ### IR Expansion
