@@ -17,6 +17,44 @@ Official documentation of ResFS:
 
 - ResFS Wiki (TBD)
 
+# Project structure
+```
+resfs/
+├── spec.md            
+├── README.md
+├── Makefile 
+├── LICENSE 
+├── .gitignore
+├── libresfs/
+│   ├── include/
+│   │   └── resfs.h  
+│   ├── src/
+│   │   ├── bh.c
+│   │   ├── cow.c
+│   │   ├── dli.c
+│   │   ├── eop.c
+│   │   ├── gc.c
+│   │   ├── mba.c
+│   │   ├── mount.c
+│   │   ├── recovery.c  
+│   │   ├── segment.c 
+│   │   ├── smi.c
+│   │   ├── snap.c
+│   │   └── wia.c
+│   └── vendor/blake3/
+├── tools/
+│   ├── mkfs.c
+│   ├── verify.c
+│   ├── recover.c
+│   ├── snap.c
+│   ├── export.c
+│   ├── import.c
+│   └── visualize.c
+└── tests/
+    └── mkfs.sh
+```
+
+
 # ResFS Disk Partition Layout
 
 ```
@@ -88,8 +126,8 @@ This produces:
 - `tools/recover` — manual recovery tool
 - `tools/snap` — snapshot management
 - `tools/export` — extract raw file or recovery container from ResFS
-- `tools/visualize` — ASCII visualization of segment and free space layout
 - `tools/import` — import from ext4/NTFS/exFAT/APFS to ResFS
+- `tools/visualize` — ASCII visualization of segment and free space layout
 
 ### Clean
 Removes all compiled objects, `libresfs.a` and tool binaries:
