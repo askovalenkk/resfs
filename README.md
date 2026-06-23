@@ -31,23 +31,23 @@ ResFS uses CoW (Copy-on-Write) algorithm for write operations and a log, called 
 [End of Partition segment (EOP)]
 ```
 
-## Bootstrap Header (BH)
+### Bootstrap Header (BH)
 Bootstrap Header is the first segment of the whole partition. It consists of partition identity (UUID, segment size, FS label, etc.), LBA boundaries of all data structures and the disk partition itself. BH segment starts with special signature which encodes as "RESFS PARTITION" in ASCII.
 
-## End of Partition (EOP)
+### End of Partition (EOP)
 End of Partition segment is the last segment of the partition, which contains the same information as the Bootstrap Header. Tail signature at the end of the EOP segment encodes in ASCII as "END OF RESFS PARTITION". Readable signatures at the start and the end of every ResFS disk partition make it recognizable for disk parsers even if GPT is corrupted.
 
-## Write Intent Array (WIA)
+### Write Intent Array (WIA)
 Write Intent Array is an operation log which allows the mount operation to detect segments committed before metadata update. ResFS is a Copy-on-Write file system, so old file version remains unchanged until the new one is fully written. In case of a crash during a CoW rewrite, the Index Region may not yet reflect the newly written segments. WIA allows the mount algorithm to locate and recover these committed but unindexed segments. If changes were not committed by the moment crash happened, IR will point to old segments.
 
-## Snapshot Region (SR)
+### Snapshot Region (SR)
 Snapshot Region is a fixed-size table located after WIA. Each SR entry holds a snapshot ID and a file ID of its corresponding snapshot file stored in the Data Region. Snapshot files contain a flat array of extents belonging to segments that were superseded by CoW rewrites after the snapshot was created.
 
 During mount, the allocator reads SR to find all live snapshots, retrieves their file IDs, looks them up in SMI and marks their extents as occupied in the bitmap. This prevents the block allocator from overwriting segments that belong to live snapshots.
 
 Each superseded segment carries the ID of the oldest live snapshot that holds it. When a snapshot is deleted, ResFS walks its snapshot file, updates or clears the snapshot ID on each segment, and frees blocks that are no longer held by any snapshot.
 
-## Index Region (IR)
+### Index Region (IR)
 Index Region is a metadata acceleration structure which allows the FS to quickly locate file segments without scanning the entire disk. ResFS maintains three independent Index Region copies (IR1, IR2, IR3) distributed across the partition (IR1 is located at the start of partition, IR2 in the midpoint and IR3 in the end of partition). All three are kept in sync after every write operation using a sequential FIFO update order (IR1 → IR2 → IR3), which guarantees that at least one copy always contains consistent metadata even in case of a crash during IR update.
 
 Each Index Region consists of two tables:
@@ -56,17 +56,17 @@ Each Index Region consists of two tables:
 
 **Directory Lookup Index (DLI)** — maps file and directory names to their file IDs. DLI enables fast path lookup without traversing directory segments on disk.
 
-## IR Expansion
+### IR Expansion
 Each IR has fixed size defined by initial layout calculations at mkfs. Although Index Regions usually remain the initial size, in case of IR overflow they can be expanded into expansion buffers. Block allocator doesn't write any data into expansion buffers unless necessary. Any data placed there will be rewritten using CoW.
 
 # Building
 
-## Dependencies
+### Dependencies
 - gcc
 - make
 - BLAKE3 (vendored, no installation required)
 
-## Build
+### Build
 ResFS is built as a static library `libresfs.a` which contains all core filesystem logic. Each tool in `tools/` is compiled separately and linked against it.
 
 Running `make` compiles everything at once:
@@ -84,7 +84,7 @@ This produces:
 - `tools/visualize` — ASCII visualization of segment and free space layout
 - `tools/import` — import from ext4/NTFS/exFAT/APFS to ResFS
 
-## Clean
+### Clean
 Removes all compiled objects, `libresfs.a` and tool binaries:
 ```bash
 make clean
