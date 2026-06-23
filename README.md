@@ -66,7 +66,7 @@ Each Index Region consists of two tables:
 **Directory Lookup Index (DLI)** — maps file and directory names to their file IDs. DLI enables fast path lookup without traversing directory segments on disk.
 
 ### IR Expansion
-Each IR has fixed size defined by initial layout calculations at mkfs. Although Index Regions usually remain the initial size, in case of IR overflow they can be expanded into expansion buffers. Block allocator doesn't write any data into expansion buffers unless necessary. Any data placed there will be rewritten using CoW.
+Each IR has initial size defined by layout calculations at mkfs. Although Index Regions usually remain the initial size, in case of IR overflow they can be expanded into expansion buffers. Block allocator doesn't write any data into expansion buffers unless necessary. Any data placed there will be rewritten using CoW.
 
 # Building
 
