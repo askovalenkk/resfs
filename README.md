@@ -6,9 +6,7 @@ Recovery-First File System (ResFS) is a file system in which every physically ex
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
 # What is ResFS?
-ResFS is a file system which has no inode table or superblock. ResFS disk partitions have unique metadata and segment structure. ResFS is a segment-native FS, which means that every segment already contains its own metadata and every segment is a source of truth. All metadata structures are used only as an acceleration level. 
-
-ResFS uses CoW (Copy-on-Write) algorithm for write operations and a log, called WIA (Write Intent Array) which helps the mount algorithm to find any aborted operations in crash recovery conditions. 
+ResFS is a file system which has no inode table or superblock. ResFS disk partitions have unique metadata and segment structure. ResFS is a segment-native FS, which means that every segment already contains its own metadata and every segment is a source of truth. All metadata structures are used only as an acceleration level. ResFS uses CoW (Copy-on-Write) algorithm for write operations, which guarantees that at least one correct file version still physically exists on the disk.
 
 # Documentation
 Official documentation of ResFS:
