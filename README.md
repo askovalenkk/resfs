@@ -135,5 +135,22 @@ Removes all compiled objects, `libresfs.a` and tool binaries:
 make clean
 ```
 
+# Testing
+
+After cloning it with the command:
+
+```bash
+git clone https://github.com/askovalenkk/resfs
+```
+
+You can run the bash scripts from `tests/`:
+- `mkfs.sh` — makes a disk image and formats it with a ResFS partition
+- `verify.sh` — check disk for any corruptions
+- `recover.sh` — finds and recovers all existing files on the disk partition
+- `search.sh` — finds LBA boundaries of the ResFS disk partition without GPT
+- `kill-9.sh` — runs *kill -9* while writing files on the disk partition
+- `corrupt-gpt.sh` — target *dd if=/dev/zero...* for both GPT copies of the ResFS disk image
+- `corrupt-metadata.sh` — target *dd if=/dev/zero...* for all disk metadata
+
 # License
 ResFS is released under the MIT License. This license covers all original source code in this repository. The vendored BLAKE3 implementation (`libresfs/vendor/blake3`) is released under the CC0 license.
