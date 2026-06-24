@@ -33,7 +33,6 @@ resfs/
 │   │   ├── cow.c
 │   │   ├── dli.c
 │   │   ├── eop.c
-│   │   ├── gc.c
 │   │   ├── mba.c
 │   │   ├── mount.c
 │   │   ├── recovery.c  
