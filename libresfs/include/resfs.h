@@ -12,8 +12,7 @@
 
 // ResFS signatures
 #define BH_SIG "RESFS PARTITION "
-#define ROOT_SIG "RESFS ROOT "
-#define EOP_TAIL_TEXT "END OF RESFS PARTITION"
+#define ROOT_SIG "RESFS ROOT"
 #define EOP_SIG "ResFSEOP"
 #define SMI_SIG "ResFSSMI"
 #define DLI_SIG "ResFSDLI"
@@ -158,9 +157,9 @@ struct resfs_smi_h {
 _Static_assert(sizeof(struct resfs_smi_h) == 4096, "resfs_smi_h must be 4096 bytes");	
 
 struct resfs_smi_entry {
-	uint64_t file_id
+	uint64_t file_id;
 	uint64_t seg0_lba;
-}
+} __packed;
 
 struct resfs_dli_h {
 	uint8_t dli_sig[8];
@@ -196,7 +195,6 @@ struct resfs_seg0 {
 	uint32_t permissions;
 	uint32_t reserved2;
 	uint64_t generation;
-	uint64_t created_at;
 	uint64_t modified_at;
 	uint64_t owner_uid;
 	uint64_t owner_gid;

@@ -891,21 +891,20 @@ Offset  Size    Field           Description
 328     4       permissions     Unix rwxrwxrwx + setuid/setgid/sticky (12 bits)
 332     4       reserved        Must be 0x00000000
 336     8       generation      u64, incremented on each CoW rewrite of SEG 0
-344     8       created_at      u64, Unix timestamp nanoseconds (file creation)
-352     8       modified_at     u64, Unix timestamp nanoseconds (last write)
-360     8       owner_uid       u64
-368     8       owner_gid       u64
-376     8       hardlink_id     u64, shared file_id if hardlink, else 0
+344     8       modified_at     u64, Unix timestamp nanoseconds (last write)
+352     8       owner_uid       u64
+360     8       owner_gid       u64
+368     8       hardlink_id     u64, shared file_id if hardlink, else 0
 ```
 
-Total header: offset 72 to 383 = 312 bytes. With segment header (72B): 384B.
+Total header: offset 72 to 375 = 304 bytes. With segment header (72B): 376B.
 
 ### IS_INLINE = 1 (small files, ≤ 3688 bytes)
 
 ```
 [Segment header: 72B]
-[SEG 0 header: 312B]
-[inline data: 3688B]
+[SEG 0 header: 304B]
+[inline data: 3696B]
 [Segment footer: 24B]
 ```
 
@@ -919,14 +918,14 @@ new SEG 0 without IS_INLINE + data in separate segments.
 
 ```
 [Segment header: 72B]
-[SEG 0 header: 312B]
+[SEG 0 header: 304B]
 [extent_count: u64, 8B]
 [extents: extent_count × 20B]
 [zeroed padding to footer]
 [Segment footer: 24B]
 ```
 
-Maximum extents: (4096 - 72 - 312 - 8 - 24) / 20 = 3680 / 20 = **184 extents**.
+Maximum extents: (4096 - 72 - 304 - 8 - 24) / 20 = 3688 // 20 = **184 extents**.
 
 If extent_count > 184: set EXT_OVERFLOW flag. On full disk scan,
 file is treated as orphaned — all physically present segments are collected
