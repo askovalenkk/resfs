@@ -8,7 +8,7 @@ CFLAGS = -Ilibresfs/include -Ilibresfs/vendor/blake3 -Wall -Wextra -g
 LIB_SRCS = $(wildcard libresfs/src/*.c) $(wildcard libresfs/vendor/blake3/*.c)
 LIB_OBJS = $(LIB_SRCS:.c=.o)
 
-TOOLS = tools/mkfs tools/verify tools/recover tools/snap tools/gc
+TOOLS = tools/mkfs tools/mount tools/verify tools/recover tools/snap tools/export tools/import tools/visualize
 
 all: libresfs.a $(TOOLS)
 
