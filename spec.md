@@ -512,7 +512,7 @@ Offset  Size    Field               Description
 16      8       created_at          u64, Unix timestamp nanoseconds
 24      1       live                u8, 1 = live, 0 = deleted
 25      3       reserved            must be 0
-280     32      blake3_hash         BLAKE3 of bytes [0..279]
+28      32      blake3_hash         BLAKE3 of bytes [0..59]
 ```
 
 ### Snapshot Files
@@ -813,7 +813,7 @@ Power loss after step 5: new BH valid → new IRs valid.
 Offset  Size    Field           Description
 ------  ----    -----           -----------
 
-=== HEADER (72 bytes) ===
+=== HEADER (88 bytes) ===
 
 0       8       SEG_SIG         Magic: "ResFSSEG"
 8       8       file_id         u64, monotonic counter
@@ -824,11 +824,11 @@ Offset  Size    Field           Description
 32      8       file_size       u64, total file size in bytes (0 for IS_DIRECTORY)
 40      8       snapshot_id     u64, newest live snapshot retaining this block (0 if none)
 48      8       created_at      u64, Unix timestamp nanoseconds of this segment write
-56      32      blake3_hash     BLAKE3-256 of data region [72..4071]
+56      32      blake3_hash     BLAKE3-256 of data region [88..4071]
 
-=== DATA REGION (4000 bytes) ===
+=== DATA REGION (3984 bytes) ===
 
-72      4000    data            Raw file data (or SEG 0 layout for IS_FIRST_SEG)
+88      3984    data            Raw file data (or SEG 0 layout for IS_FIRST_SEG)
 
 === FOOTER (24 bytes) ===
 
@@ -838,7 +838,7 @@ Offset  Size    Field           Description
 4092    4       reserved        Must be 0x00000000
 ```
 
-**Overhead: 96 bytes / 4096 = 2.34%**
+**Overhead: 112 bytes / 4096 = 2.73%**
 
 ---
 
@@ -886,25 +886,25 @@ for small files. SEG 0 is 4096 bytes total (one block).
 ```
 Offset  Size    Field           Description
 ------  ----    -----           -----------
-72      1       filename_len    u8, length of filename in bytes
-73      255     filename        UTF-8, null-padded
-328     4       permissions     Unix rwxrwxrwx + setuid/setgid/sticky (12 bits)
-332     4       reserved        Must be 0x00000000
-336     8       generation      u64, incremented on each CoW rewrite of SEG 0
-344     8       modified_at     u64, Unix timestamp nanoseconds (last write)
-352     8       owner_uid       u64
-360     8       owner_gid       u64
-368     8       hardlink_id     u64, shared file_id if hardlink, else 0
+88      1       filename_len    u8, length of filename in bytes
+89      255     filename        UTF-8, null-padded
+344     4       permissions     Unix rwxrwxrwx + setuid/setgid/sticky (12 bits)
+348     4       reserved        Must be 0x00000000
+352     8       generation      u64, incremented on each CoW rewrite of SEG 0
+360     8       modified_at     u64, Unix timestamp nanoseconds (last write)
+368     8       owner_uid       u64
+376     8       owner_gid       u64
+384     8       hardlink_id     u64, shared file_id if hardlink, else 0
 ```
 
-Total header: offset 72 to 375 = 304 bytes. With segment header (72B): 376B.
+Total header: offset 88 to 392 = 304 bytes. With segment header (88B): 392B.
 
-### IS_INLINE = 1 (small files, ≤ 3688 bytes)
+### IS_INLINE = 1 (small files, ≤ 3680 bytes)
 
 ```
-[Segment header: 72B]
+[Segment header: 88B]
 [SEG 0 header: 304B]
-[inline data: 3696B]
+[inline data: 3680B]
 [Segment footer: 24B]
 ```
 
@@ -917,7 +917,7 @@ new SEG 0 without IS_INLINE + data in separate segments.
 ### IS_INLINE = 0 (regular files)
 
 ```
-[Segment header: 72B]
+[Segment header: 88B]
 [SEG 0 header: 304B]
 [extent_count: u64, 8B]
 [extents: extent_count × 20B]
@@ -925,9 +925,9 @@ new SEG 0 without IS_INLINE + data in separate segments.
 [Segment footer: 24B]
 ```
 
-Maximum extents: (4096 - 72 - 304 - 8 - 24) / 20 = 3688 // 20 = **184 extents**.
+Maximum extents: (4096 - 88 - 304 - 8 - 24) // 20 = 3668 // 20 = **183 extents**.
 
-If extent_count > 184: set EXT_OVERFLOW flag. On full disk scan,
+If extent_count > 183: set EXT_OVERFLOW flag. On full disk scan,
 file is treated as orphaned — all physically present segments are collected
 but correctness is not guaranteed. This requires extreme fragmentation
 (defragmenter threshold is 8 extents) and is practically impossible
