@@ -50,9 +50,14 @@ resfs/
 │   ├── import.c
 │   └── visualize.c
 └── tests/
-    └── mkfs.sh
+    ├── mkfs.sh
+    ├── verify.sh
+    ├── recover.sh
+    ├── search.sh
+    ├── kill-9.sh
+    ├── corrupt-gpt.sh
+    └── corrupt-metadata.sh
 ```
-
 
 # ResFS Disk Partition Layout
 
@@ -89,14 +94,12 @@ Snapshot Region is a fixed-size table located after WIA. Each SR entry holds a s
 
 During mount, the allocator reads SR to find all live snapshots, retrieves their file IDs, looks them up in SMI and marks their extents as occupied in the bitmap. This prevents the block allocator from overwriting segments that belong to live snapshots.
 
-Each superseded segment carries the ID of the oldest live snapshot that holds it. When a snapshot is deleted, ResFS walks its snapshot file, updates or clears the snapshot ID on each segment, and frees blocks that are no longer held by any snapshot.
-
 ### Index Region (IR)
 Index Region is a metadata acceleration structure which allows the FS to quickly locate file segments without scanning the entire disk. ResFS maintains three independent Index Region copies (IR1, IR2, IR3) distributed across the partition (IR1 is located at the start of partition, IR2 in the midpoint and IR3 in the end of partition). All three are kept in sync after every write operation using a sequential FIFO update order (IR1 → IR2 → IR3), which guarantees that at least one copy always contains consistent metadata even in case of a crash during IR update.
 
 Each Index Region consists of two tables:
 
-**Segment Map Index (SMI)** — maps every file ID to its extents on disk. SMI is the primary structure used to locate file data during read operations.
+**Segment Map Index (SMI)** — maps every file ID to its SEG0 location. SMI is the primary structure used to locate file data during read operations.
 
 **Directory Lookup Index (DLI)** — maps file and directory names to their file IDs. DLI enables fast path lookup without traversing directory segments on disk.
 
