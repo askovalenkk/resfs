@@ -568,7 +568,7 @@ Offset  Size    Field               Description
 0       8       SMI_SIG             "ResFSSMI"
 8       8       reserved            u64, must be 0
 16      8       generation          u64, incremented on each IR write
-24      8       file_count          u64, next file_id to assign
+24      8       file_counter          u64, next file_id to assign
 32      8       used_blocks         u64, occupied blocks in Data Region
 40      8       last_mount          u64, Unix timestamp nanoseconds
 48      8       entry_count         u64
@@ -919,6 +919,7 @@ new SEG 0 without IS_INLINE + data in separate segments.
 ```
 [Segment header: 88B]
 [SEG 0 header: 304B]
+[reserved: 12B]
 [extent_count: u64, 8B]
 [extents: extent_count × 20B]
 [zeroed padding to footer]
@@ -1389,7 +1390,7 @@ For each 4096-byte block in Data Region:
 ```
 1. Check "ResFSSEG" magic at offset 0
 2. Check "ResFSEND" magic at offset 4072
-3. Verify BLAKE3 of data region [72..4071]
+3. Verify BLAKE3 of data region [88..4071]
 4. Validate footer: file_id and seg_index must match header
 5. If IS_FIRST_SEG (SEG 0):
    a. Check IS_COMMITTED
@@ -1505,7 +1506,7 @@ mode 2 — recovery container:
 - Minimum block size: 4096 bytes (fixed)
 - Maximum partition size: 64 ZiB (u64 LBA × 4KB blocks)
 - Maximum files per partition: 2^64 (u64 file_id counter)
-- Maximum file size: 184 extents × u64 length_blocks × 4KB
+- Maximum file size: 183 extents × u64 length_blocks × 4KB
 
 ---
 
@@ -1635,8 +1636,8 @@ GC + Snapshot interaction formalized. IR Expansion moved to Phase 1.
 - SEG 0 redesigned as file manifest:
   carries complete extent list, generation counter, IS_INLINE flag
   IS_INLINE=1: data inline in SEG 0 (≤ 3688B), no additional blocks
-  IS_INLINE=0: up to 184 extents in SEG 0
-  EXT_OVERFLOW flag for pathological fragmentation (>184 extents)
+  IS_INLINE=0: up to 183 extents in SEG 0
+  EXT_OVERFLOW flag for pathological fragmentation (>183 extents)
 - generation counter on SEG 0 only (removed from all other segments)
 - created_at u64 nanoseconds added to every segment (8B overhead)
 - Snapshot model redesigned:

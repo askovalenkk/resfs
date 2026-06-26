@@ -16,7 +16,7 @@
 #define EOP_SIG "ResFSEOP"
 #define SMI_SIG "ResFSSMI"
 #define DLI_SIG "ResFSDLI"
-#define SNAP_SIG "ResFSSNP"
+#define SR_SIG "ResFSSNP"
 #define SEG_SIG "ResFSSEG"
 #define SEG_END_SIG "ResFSEND"
 #define WIA_SIG "ResFSWIA"
@@ -86,7 +86,7 @@
 #define RESFS_MIN_WIA_BLOCKS 8
 #define RESFS_MIN_IR_BLOCKS 768
 #define RESFS_DEFRAG_THRESHOLD 8
-#define RESFS_MAX_EXTENTS 184
+#define RESFS_MAX_EXTENTS 183
 #define RESFS_MIN_FREE 1
 
 #define __packed __attribute__((packed))
@@ -152,7 +152,6 @@ struct resfs_extent {
     uint64_t start_lba;
     uint64_t length_blocks;
     uint32_t seg_index;
-    uint32_t reserved;
 } __packed;
 
 struct resfs_snap_extent {
@@ -261,7 +260,7 @@ struct resfs_seg0 {
 	uint64_t owner_uid;
 	uint64_t owner_gid;
 	uint64_t hardlink_id;
-	uint8_t resrtved3[12];
+	uint8_t reserved3[12];
 	uint64_t extent_count;
 	struct resfs_extent extents[];
 } __packed;
