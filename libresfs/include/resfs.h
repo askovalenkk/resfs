@@ -188,8 +188,7 @@ struct resfs_sr_h {
 	uint8_t sr_sig[8];
 	uint64_t snapshot_counter;
 	uint64_t entry_count;
-	uint64_t live_count;
-	uint8_t reserved[4064];
+	uint8_t reserved[4072];
 } __packed;
 
 _Static_assert(sizeof(struct resfs_sr_h) == 4096, "resfs_sr_h must be 4096 bytes");

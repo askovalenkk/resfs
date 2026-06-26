@@ -498,9 +498,10 @@ Offset  Size    Field               Description
 0       8       SR_SIG              Magic: "ResFSSNP"
 8       8       snapshot_counter    u64, monotonic counter for snapshot_id assignment
 16      8       entry_count         u64, number of entries (live + deleted)
-24      8       live_count          u64, number of live snapshots
-32      4064    reserved            pad to 4096 bytes
+24      4072    reserved            pad to 4096 bytes
 ```
+
+`live_count` is an in-memory value only. It is computed at mount by counting SR entries where `live == 1`. It is never written to disk.
 
 ### SR Entry (fixed size)
 
@@ -1196,7 +1197,15 @@ Power loss at any step leaves the filesystem in a consistent state.
 6. Write new SEG 0 with generation+1, new extents
 7. Set IS_COMMITTED on new SEG 0
 8. Update SMI: seg0_lba → new address
-9. Clear old blocks in bitmap
+9. If sr.live_count == 0:
+     Clear old blocks in bitmap
+   If sr.live_count > 0:
+     For each old superseded segment:
+       If newest_live_snapshot.created_at > segment.created_at:
+         Set segment.snapshot_id = newest_live_snapshot.snapshot_id
+         Append extent to that snapshot's snap file
+       Else:
+         Clear block in bitmap
 10. Write IR1 → IR2 → IR3
 11. Clear IS_COMMITTED
 12. Remove WIA entry
@@ -1219,17 +1228,26 @@ Power loss at any step leaves the filesystem in a consistent state.
 2. Find SEG 0 via SMI (seg0_lba)
 3. Read extents from SEG 0
 4. Determine segments beyond new_size
-5. Update SEG 0 in-place: remove excess extents, update file_size
-6. If sr.live_count == 0:
-     Clear removed blocks in bitmap
-   If sr.live_count > 0:
-     For each removed segment:
-       If newest_live_snapshot.created_at > segment.created_at:
-         Set segment.snapshot_id = newest_live_snapshot.snapshot_id
-         Append extent to that snapshot's snap file
-       Else:
-         Clear block in bitmap
-7. Write IR1 → IR2 → IR3
+5. Allocate new block for new SEG 0 in bitmap
+6. Write WIA entry (file_id, WRITE, new extents)
+7. Write new SEG 0 with generation+1, trimmed extents, updated file_size
+8. Compute BLAKE3, verify
+9. Set IS_COMMITTED on new SEG 0
+10. Update SMI: seg0_lba → new address
+    if file_id > smi.file_counter: smi.file_counter = file_id + 1
+11. If sr.live_count == 0:
+      Clear removed blocks + old SEG 0 block in bitmap
+    If sr.live_count > 0:
+      For each removed segment:
+        If newest_live_snapshot.created_at > segment.created_at:
+          Set segment.snapshot_id = newest_live_snapshot.snapshot_id
+          Append extent to that snapshot's snap file
+        Else:
+          Clear block in bitmap
+      Clear old SEG 0 block in bitmap
+12. Write IR1 → IR2 → IR3
+13. Clear IS_COMMITTED
+14. Remove WIA entry
 ```
 
 ### DELETE
@@ -1256,8 +1274,11 @@ Power loss at any step leaves the filesystem in a consistent state.
 
 ```
 1. Find file_id via DLI
-2. Update DLI entry in-place: new name_hash, new parent_dir_id
-3. Write IR1 → IR2 → IR3
+2. COW_WRITE old parent directory segment: remove old entry
+3. COW_WRITE new parent directory segment: add new entry with new name
+   (if old and new parent are the same directory: steps 2 and 3 merge into one COW_WRITE)
+4. Update DLI entry in-place: new name_hash, new parent_dir_id
+5. Write IR1 → IR2 → IR3
 ```
 
 ### SNAPSHOT_CREATE
@@ -1266,7 +1287,7 @@ Power loss at any step leaves the filesystem in a consistent state.
 1. snapshot_id = atomic_increment(sr.snapshot_counter)
 2. Create snap file via CREATE (IS_SNAPSHOT_FILE flag, empty)
 3. Write SR entry: {snapshot_id, snap_file_id, label, created_at=now(), live=1}
-4. Update SR live_count
+4. Increment sr.live_count in memory
 5. Write IR1 → IR2 → IR3
 ```
 
@@ -1285,7 +1306,7 @@ Power loss at any step leaves the filesystem in a consistent state.
      Clear block in bitmap
 6. DELETE snap file (regular DELETE operation)
 7. Set SR entry live = 0
-8. Update SR live_count
+8. Decrement sr.live_count in memory
 9. Write IR1 → IR2 → IR3
 ```
 
@@ -1333,19 +1354,21 @@ pack small files together.
 6. Synchronize other IR copies if needed (lazy, background)
 
 7. Read WIA Header at block 1 — verify BLAKE3
-   if WIA entry_count == 0 → skip to step 11 (clean mount)
+   if WIA entry_count == 0 → skip to step 12 (clean mount)
    if WIA invalid → fallback to full Data Region scan (step 13)
 
 8. For each WIA entry:
    a. Read SEG 0 LBA from WIA extents
    b. Check SEG 0 for IS_COMMITTED
    c. IS_COMMITTED=1 → add extents to SMI, update seg0_lba
+      → if file_id > smi.file_counter: smi.file_counter = file_id + 1
    d. IS_COMMITTED=0 → mark new blocks free in bitmap
 
 9. Update all three IR copies with recovered SMI state
 10. Clear WIA (zero entry_count, recompute BLAKE3)
-11. Build free space bitmap (SMI + SR, see Bitmap Construction)
-12. Mount
+11. Load SR — compute sr.live_count = count(SR entries where live == 1)
+12. Build free space bitmap (SMI + SR, see Bitmap Construction)
+13. Mount
 
 Fallback (WIA invalid):
   Scan all Data Region blocks not present in SMI bitmap
