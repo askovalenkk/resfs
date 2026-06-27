@@ -1234,7 +1234,6 @@ Power loss at any step leaves the filesystem in a consistent state.
 8. Compute BLAKE3, verify
 9. Set IS_COMMITTED on new SEG 0
 10. Update SMI: seg0_lba → new address
-    if file_id > smi.file_counter: smi.file_counter = file_id + 1
 11. If sr.live_count == 0:
       Clear removed blocks + old SEG 0 block in bitmap
     If sr.live_count > 0:
@@ -1503,6 +1502,20 @@ mode 2 — recovery container:
   → extract file + recovery_info (missing/damaged segment map)
   → consumer decides how to handle gaps
 ```
+
+---
+## Build Model
+
+libresfs core (libresfs/include/, libresfs/src/):
+  - Freestanding — no libc dependency
+  - Only stdint.h and stddef.h
+  - Compiles on any platform including bare-metal kernels
+  - Target: RhK kernel, any OS kernel
+
+tools/ (mkfs, verify, recover, snap, export, import, visualize):
+  - Requires POSIX-compatible libc and syscalls
+  - Not freestanding
+  - Target: Linux, RhCOS userspace, any Unix-like OS
 
 ---
 
