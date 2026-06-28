@@ -84,10 +84,12 @@
 #define RESFS_FILE_ID_NULL 0
 #define RESFS_FILE_ID_ROOT 1
 #define RESFS_MIN_WIA_BLOCKS 8
-#define RESFS_MIN_IR_BLOCKS 768
+#define RESFS_MIN_SR_BLOCKS 8
+#define RESFS_MIN_IR_BLOCKS 384
 #define RESFS_DEFRAG_THRESHOLD 8
 #define RESFS_MAX_EXTENTS 183
 #define RESFS_MIN_FREE 1
+#define RESFS_MIN_SIZE_MB 16
 
 #define __packed __attribute__((packed))
 
