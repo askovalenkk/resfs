@@ -16,3 +16,10 @@ dist/
 .obsidian/
 .idea/
 .DS_Store
+export
+import
+mkfs
+recover
+snap
+verify
+visualize
