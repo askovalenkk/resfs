@@ -34,29 +34,29 @@
 #define ERR_WIA_BUSY -9
 
 /* BH & EOP feature flags */
-#define FEAT_ENCRYPTION (1u << 0)
-#define FEAT_COMPRESSION (1u << 1)
-#define FEAT_SNAPSHOTS (1u << 2)
-#define FEAT_SPARSE (1u << 3)
-#define FEAT_ACL (1u << 4)
-#define FEAT_XATTR (1u << 5)
+#define FEAT_ENCRYPTION UINT32_C(1) << 0
+#define FEAT_COMPRESSION UINT32_C(1) << 1
+#define FEAT_SNAPSHOTS UINT32_C(1) << 2
+#define FEAT_SPARSE UINT32_C(1) << 3
+#define FEAT_ACL UINT32_C(1) << 4
+#define FEAT_XATTR UINT32_C(1) << 5
 
 /* SEG flags */
-#define IS_FIRST_SEG (1u << 0)
-#define IS_LAST_SEG (1u << 1)
-#define IS_COMPRESSED (1u << 2)
-#define IS_ENCRYPTED (1u << 3)
-#define IS_INLINE (1u << 4)
-#define IS_DELETED (1u << 5)
-#define IS_COMMITTED (1u << 6)
-#define IS_DIRECTORY (1u << 7)
-#define IS_SYMLINK (1u << 8)
-#define IS_DEVICE_FILE (1u << 9)
-#define IS_SPARSE_SEG (1u << 10)
-#define IS_XATTR_SEG (1u << 11)
-#define IS_ACL_SEG (1u << 12)
-#define IS_SNAPSHOT_FILE (1u << 13)
-#define EXT_OVERFLOW (1u << 14)
+#define IS_FIRST_SEG UINT32_C(1) << 0
+#define IS_LAST_SEG UINT32_C(1) << 1
+#define IS_COMPRESSED UINT32_C(1) << 2
+#define IS_ENCRYPTED UINT32_C(1) << 3
+#define IS_INLINE UINT32_C(1) << 4
+#define IS_DELETED UINT32_C(1) << 5
+#define IS_COMMITTED UINT32_C(1) << 6
+#define IS_DIRECTORY UINT32_C(1) << 7
+#define IS_SYMLINK UINT32_C(1) << 8
+#define IS_DEVICE_FILE UINT32_C(1) << 9
+#define IS_SPARSE_SEG UINT32_C(1) << 10
+#define IS_XATTR_SEG UINT32_C(1) << 11
+#define IS_ACL_SEG UINT32_C(1) << 12
+#define IS_SNAPSHOT_FILE UINT32_C(1) << 13
+#define EXT_OVERFLOW UINT32_C(1) << 14
 
 /* WIA operations */
 #define WIA_OP_CREATE 1
