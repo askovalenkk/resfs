@@ -1536,6 +1536,39 @@ tools/ (mkfs, verify, recover, snap, export, import, visualize):
 
 ---
 
+## Platform Abstraction
+
+libresfs is freestanding and has no dependency on any host OS.
+All disk I/O is performed through a platform abstraction layer.
+
+### resfs_platform
+
+```c
+struct resfs_platform {
+    int (*read_block)(uint64_t lba, void *buf, void *ctx);
+    int (*write_block)(uint64_t lba, const void *buf, void *ctx);
+    void *ctx;
+};
+```
+
+`read_block` and `write_block` must read/write exactly one 4096-byte
+block at the given LBA. Return 0 on success, negative error code on failure.
+
+`ctx` is an opaque pointer passed back to every call — use it to carry
+platform-specific state (file descriptor, device handle, etc.).
+
+### Known implementations
+
+| Platform          | Location              |
+|-------------------|-----------------------|
+| RhK kernel        | RhK repository        |
+| Linux kernel module | linux/ (future)     |
+
+Tools in `tools/` do not use `resfs_platform` — they access disk images and
+disks directly via POSIX `pread`/`pwrite`.
+
+---
+
 ## Minimum Requirements
 
 - Minimum partition size: 64 MB
