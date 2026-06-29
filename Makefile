@@ -36,4 +36,4 @@ install: $(TOOLS)
 	install -m 755 tools/visualize /usr/local/bin/resfs-visualize
 
 .PHONY: all clean install
-include local.mk
+-include local.mk

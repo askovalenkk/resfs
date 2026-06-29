@@ -16,6 +16,8 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <libgen.h>
+#include <sys/ioctl.h>
+#include <linux/fs.h>
 
 #include "resfs.h"
 
