@@ -189,7 +189,7 @@ Nothing is irreplaceable.
 Its location is always known: block 1. No pointer needed.
 
 **Index Regions have initial size** defined at mkfs. They expand into
-adjacent expansion buffers when SMI + DLI approach capacity.
+adjacent expansion buffers when SMI or DLI reaches 95% capacity.
 IR1 and IR2 expand downward (into Data Region). IR3 expands leftward.
 
 **Expansion buffers** are initially part of the Data Region. The block
@@ -264,19 +264,45 @@ Bit     Meaning
 wia_size  = max(MIN_WIA_BLOCKS, total_blocks / 1000)
 MIN_WIA_BLOCKS = 8 (32KB)
 
-ir_size   = max(MIN_IR_BLOCKS, total_blocks * 3 / 1000)
-MIN_IR_BLOCKS = 768 (3MB)
+ir_size        = max(MIN_IR_BLOCKS, total_blocks * 2 / 1000)  (~0.2% per IR copy)
+MIN_IR_BLOCKS  = 128 (512KB per IR copy)
 
-buffer_blocks = max(1280, total_blocks * 5 / 1000)  (~0.5%, min 5MB)
+buffer_blocks      = max(MIN_BUFFER_BLOCKS, total_blocks * 3 / 1000)  (~0.3% per buffer)
+MIN_BUFFER_BLOCKS  = 192 (768KB per buffer)
 
-wia_start  = 1
-sr_start   = wia_start + wia_size
-ir1_start  = sr_start + sr_size
+wia_start   = 1
+sr_start    = wia_start + wia_size
+ir1_start   = sr_start + sr_size
 data1_start = ir1_start + ir_size + buffer_blocks
-ir2_start  = total_blocks / 2
+ir2_start   = total_blocks / 2
 data2_start = ir2_start + ir_size + buffer_blocks
-ir3_start  = total_blocks - ir_size - 1
+ir3_start   = total_blocks - ir_size - 1
 EOP: last_lba = total_blocks - 1
+```
+
+### SMI/DLI Block Distribution (per IR copy)
+
+For a given IR copy of `IR_BLOCKS` blocks:
+
+```
+smi_body_blocks = floor((IR_BLOCKS - 2) / 5 * 2)
+dli_body_blocks = ceil((IR_BLOCKS - 2) / 5 * 3)
+
+[SMI Header:    1 block ]
+[SMI Body:      smi_body_blocks blocks]
+[DLI Header:    1 block ]
+[DLI Body:      dli_body_blocks blocks]
+[zeroed padding to end of IR region]
+```
+
+Ratio reflects entry sizes: SMI entry = 16B, DLI entry = 24B (1.5× larger),
+so DLI body receives 1.5× more blocks than SMI body.
+
+At minimum (IR_BLOCKS = 128):
+```
+smi_body_blocks = floor(126 / 5 * 2) = floor(50.4) = 50
+dli_body_blocks = ceil(126 / 5 * 3)  = ceil(75.6)  = 76
+total: 1 + 50 + 1 + 76 = 128 blocks ✓
 ```
 
 ---
@@ -461,7 +487,7 @@ only the listed blocks for IS_COMMITTED.
 1. Read WIA Header — verify BLAKE3
    if invalid → fallback to full Data Region scan
 2. For each WIA entry:
-   a. Read SEG 0 LBA from WIA extents (seg_index = 0)
+   a. Read SEG 0 LBA from WIA extents (ext_index = 0)
    b. Check SEG 0 for IS_COMMITTED
    c. IS_COMMITTED=1 → write was committed, IR not yet updated
       → add all extents from WIA entry to SMI
@@ -527,7 +553,7 @@ Offset  Size    Field               Description
 ------  ----    -----               -----------
 0       8       start_lba           u64
 8       8       length_blocks       u64
-16      4       seg_index           u32
+16      4       ext_index           u32, read order of this extent within the file
 20      4       reserved            u32, must be 0
 24      8       file_id             u64, file this extent belongs to
 32      8       created_at          u64, Unix timestamp nanoseconds of the segment
@@ -569,7 +595,7 @@ Offset  Size    Field               Description
 0       8       SMI_SIG             "ResFSSMI"
 8       8       reserved            u64, must be 0
 16      8       generation          u64, incremented on each IR write
-24      8       file_counter          u64, next file_id to assign
+24      8       file_counter        u64, next file_id to assign
 32      8       used_blocks         u64, occupied blocks in Data Region
 40      8       last_mount          u64, Unix timestamp nanoseconds
 48      8       entry_count         u64
@@ -760,7 +786,11 @@ always contains consistent metadata even during a crash mid-update.
 
 ### IR Expansion
 
-IRs expand when SMI + DLI approach capacity. Expansion is sequential —
+IR expansion is triggered when **either** SMI **or** DLI within any IR copy
+reaches 95% of its allocated block capacity. A single table filling up is
+sufficient to trigger expansion — both do not need to be full simultaneously.
+
+IRs expand when triggered. Expansion is sequential —
 one IR at a time. While one IR expands, the other two serve reads and
 writes normally. The expanding IR is temporarily out of rotation.
 
@@ -802,10 +832,8 @@ Power loss after step 5: new BH valid → new IRs valid.
 
 | ir_size | files supported |
 |---------|----------------|
-| 0.3% (~3GB) | ~200M files |
-| 0.6% (~6GB) | ~400M files |
-| 1.2% (~12GB) | ~800M files |
-
+| 0.2% (~2GB) | ~55M files  |
+| 0.5% (~5GB) | ~137M files |
 ---
 
 ## Segment Layout (4096 bytes total)
@@ -861,9 +889,10 @@ Bit     Meaning
 10      IS_SPARSE_SEG       placeholder for sparse hole (data_len = 0)
 11      IS_XATTR_SEG        this segment contains extended attributes
 12      IS_ACL_SEG          this segment contains ACL entries
-13      IS_SNAPSHOT_FILE    this file is a snapshot extent list (owned by SR)
-14      EXT_OVERFLOW        SEG 0 only: extent count exceeds 188, file is orphaned on full scan
-15-31   Reserved, must be 0
+13      IS_POINTER_SEG      overflow extent continuation block (see EXT_OVERFLOW); carries extents beyond SEG 0 capacity
+14      IS_SNAPSHOT_FILE    this file is a snapshot extent list (owned by SR)
+15      EXT_OVERFLOW        SEG 0 only: extent count exceeds 183, ptr_lba points to IS_POINTER_SEG
+16-31   Reserved, must be 0
 ```
 
 **IS_COMMITTED is the CoW commit gate. It lives only on SEG 0.**
@@ -912,7 +941,7 @@ Total header: offset 88 to 392 = 304 bytes. With segment header (88B): 392B.
 File data is stored directly in SEG 0. No additional blocks allocated.
 Total = 4096 bytes. One block per small file.
 
-When a file grows beyond 3688 bytes, it is rewritten via COW_WRITE:
+When a file grows beyond 3680 bytes, it is rewritten via COW_WRITE:
 new SEG 0 without IS_INLINE + data in separate segments.
 
 ### IS_INLINE = 0 (regular files)
@@ -920,20 +949,44 @@ new SEG 0 without IS_INLINE + data in separate segments.
 ```
 [Segment header: 88B]
 [SEG 0 header: 304B]
-[reserved: 12B]
+[reserved: 4B]
+[ptr_lba: u64, 8B]
 [extent_count: u64, 8B]
 [extents: extent_count × 20B]
 [zeroed padding to footer]
 [Segment footer: 24B]
 ```
 
-Maximum extents: (4096 - 88 - 304 - 8 - 24) // 20 = 3668 // 20 = **183 extents**.
+Maximum extents: (4096 - 88 - 304 - 4 - 8 - 8 - 24) / 20 = 3660 / 20 = **183 extents**.
 
-If extent_count > 183: set EXT_OVERFLOW flag. On full disk scan,
-file is treated as orphaned — all physically present segments are collected
-but correctness is not guaranteed. This requires extreme fragmentation
-(defragmenter threshold is 8 extents) and is practically impossible
-under normal operation.
+`ptr_lba` is valid only when `EXT_OVERFLOW` is set. It contains the LBA of the
+first `IS_POINTER_SEG` block carrying the continuation of the extent list.
+When `EXT_OVERFLOW` is not set, `ptr_lba` is zero and ignored.
+
+### EXT_OVERFLOW and IS_POINTER_SEG
+
+If a file accumulates more than 183 extents (pathological fragmentation —
+the defragmenter threshold is 8 extents, so this is practically impossible
+under normal operation), the following applies:
+
+```
+1. New writes are blocked for this file
+2. Defragmenter is forced to run immediately
+3. If defragmentation cannot reduce extent count to ≤ 183:
+   a. EXT_OVERFLOW is set on SEG 0
+   b. ptr_lba is set to the LBA of a new IS_POINTER_SEG block
+   c. IS_POINTER_SEG carries the continuation of the extent list
+      using the same resfs_seg0 structure with IS_POINTER_SEG flag
+   d. IS_POINTER_SEG copies all metadata from SEG 0 (file_id, file_size,
+      created_at, permissions, etc.), filename_len = 0
+   e. If IS_POINTER_SEG itself overflows: set EXT_OVERFLOW on it,
+      ptr_lba points to the next IS_POINTER_SEG (chained)
+```
+
+On full disk scan, a file with `EXT_OVERFLOW` is recovered by following the
+`ptr_lba` chain. Recovery remains deterministic as long as all blocks in the
+chain are physically intact. The file is flagged as potentially inconsistent
+in `recovery_info`.
 
 ---
 
@@ -944,12 +997,12 @@ Offset  Size    Field               Description
 ------  ----    -----               -----------
 0       8       start_lba           u64
 8       8       length_blocks       u64
-16      4       seg_index           u32, position of the segment
+16      4       ext_index           u32, read order of this extent within the file
 ```
 
-Extents describe contiguous runs of segments on disk. `seg_index` identifies
-which logical position in the file this extent starts at, allowing the reader
-to assemble the file in correct order regardless of physical layout.
+Extents describe contiguous runs of segments on disk. `ext_index` identifies
+the read order of this extent, allowing the reader to assemble the file in
+correct order regardless of physical layout on disk.
 
 ---
 
@@ -987,7 +1040,7 @@ On crash: recovered from max(file_id) across all committed SEG 0 segments.
 ```
 file_id        = 1
 parent_dir_id  = 0  (sentinel, no parent)
-flags          = IS_FIRST_SEG | IS_DIRECTORY | IS_COMMITTED
+flags          = IS_FIRST_SEG | IS_DIRECTORY
 filename       = "/"
 data[0..10]    = "RESFS ROOT "   (signature at start of inline data)
 ```
@@ -1008,11 +1061,8 @@ No special treatment — same segments, same BLAKE3, same recovery.
 Variable-length entries packed sequentially in the data region:
 
 ```
-[1 byte: name_len][name_len bytes: name][8 bytes: file_id][4 bytes: flags]
+[1 byte: name_len][255 bytes: name][8 bytes: file_id][4 bytes: flags]
 ```
-
-Minimum entry (1-char name): 14 bytes.
-Average entry (~25-char name): ~38 bytes.
 
 Directory entry flags:
 
@@ -1051,7 +1101,7 @@ its own name and metadata. All hard links to the same data share a common
 Data segments (SEG 1, SEG 2, ...) exist once under the original file_id.
 
 ```
-link1: file_id=3, hardlink_id=5, name="foto.jpg"   ← own SEG 0
+link1: file_id=3, hardlink_id=5, name="photo.jpg"   ← own SEG 0
 link2: file_id=4, hardlink_id=5, name="backup.jpg" ← own SEG 0
 data:  file_id=5, SEG 1, SEG 2, ...                ← shared data
 ```
@@ -1069,11 +1119,11 @@ Device files use `IS_DEVICE_FILE` flag. SEG 0 data region contains
 ```
 Offset  Size    Field
 ------  ----    -----
-384     4       major_number    u32
-388     4       minor_number    u32
-392     8       driver_id       u64
-400     4       device_flags    u32
-404     4       device_type     u32
+392     4       major_number    u32
+396     4       minor_number    u32
+404     8       driver_id       u64
+408     4       device_flags    u32
+412     4       device_type     u32
 ```
 
 Device types:
@@ -1285,7 +1335,7 @@ Power loss at any step leaves the filesystem in a consistent state.
 ```
 1. snapshot_id = atomic_increment(sr.snapshot_counter)
 2. Create snap file via CREATE (IS_SNAPSHOT_FILE flag, empty)
-3. Write SR entry: {snapshot_id, snap_file_id, label, created_at=now(), live=1}
+3. Write SR entry: {snapshot_id, snap_file_id, created_at=now(), live=1}
 4. Increment sr.live_count in memory
 5. Write IR1 → IR2 → IR3
 ```
@@ -1418,8 +1468,11 @@ For each 4096-byte block in Data Region:
    a. Check IS_COMMITTED
    b. If IS_COMMITTED → record (file_id, generation, lba, extents from SEG 0)
    c. If not IS_COMMITTED → skip (aborted write)
-   d. If EXT_OVERFLOW → record as orphaned
-6. If not IS_FIRST_SEG:
+   d. If EXT_OVERFLOW → follow ptr_lba chain to collect all IS_POINTER_SEG blocks
+6. If IS_POINTER_SEG:
+   a. Record (file_id, lba) for association after scan
+   b. If EXT_OVERFLOW → chain continues, follow ptr_lba
+7. If not IS_FIRST_SEG and not IS_POINTER_SEG:
    a. Record (file_id, seg_index, lba) for assembly after scan
 ```
 
@@ -1450,9 +1503,11 @@ Orphan segments (valid, file_id not found in any directory):
   → filename: resfs_orphan_{file_id}
 
 EXT_OVERFLOW SEG 0:
-  → collect all segments with this file_id
-  → assemble by seg_index
-  → file flagged as potentially inconsistent
+  → follow ptr_lba chain to find all IS_POINTER_SEG blocks for this file_id
+  → assemble complete extent list from SEG 0 + pointer chain in order
+  → file flagged as potentially inconsistent in recovery_info
+  → if any IS_POINTER_SEG in chain is missing: remaining extents unrecoverable,
+     gap filled with zeros, file flagged as partially recovered
 
 Two valid SEG 0 with identical file_id, different generation:
   → take segment with higher generation (deterministic tiebreak)
@@ -1569,13 +1624,14 @@ disks directly via POSIX `pread`/`pwrite`.
 
 ---
 
-## Minimum Requirements
+## Requirements and Limitations
 
-- Minimum partition size: 64 MB
+- Minimum partition size: 16 MB
 - Minimum block size: 4096 bytes (fixed)
 - Maximum partition size: 64 ZiB (u64 LBA × 4KB blocks)
 - Maximum files per partition: 2^64 (u64 file_id counter)
 - Maximum file size: 183 extents × u64 length_blocks × 4KB
+- Maximum files (IR bottleneck): ~13.7M files per 100GB
 
 ---
 
@@ -1704,15 +1760,22 @@ GC + Snapshot interaction formalized. IR Expansion moved to Phase 1.
   Extent pool removed from SMI — extents live in SEG 0
 - SEG 0 redesigned as file manifest:
   carries complete extent list, generation counter, IS_INLINE flag
-  IS_INLINE=1: data inline in SEG 0 (≤ 3688B), no additional blocks
+  IS_INLINE=1: data inline in SEG 0 (≤ 3680B), no additional blocks
   IS_INLINE=0: up to 183 extents in SEG 0
-  EXT_OVERFLOW flag for pathological fragmentation (>183 extents)
+  EXT_OVERFLOW flag + ptr_lba for pathological fragmentation (>183 extents)
+- ptr_lba field added to SEG 0 (replaces 8B of reserved3): u64 LBA of IS_POINTER_SEG
+- IS_POINTER_SEG flag added (bit 13): overflow extent continuation block
+  IS_SNAPSHOT_FILE moved to bit 14, EXT_OVERFLOW to bit 15
+- IS_POINTER_SEG uses resfs_seg0 structure, copies metadata from SEG 0,
+  carries continuation extents; chains via EXT_OVERFLOW + ptr_lba if needed
+- seg_index renamed to ext_index in resfs_extent and resfs_snap_extent:
+  ext_index is read order of the extent within the file, independent of seg_index
 - generation counter on SEG 0 only (removed from all other segments)
 - created_at u64 nanoseconds added to every segment (8B overhead)
 - Snapshot model redesigned:
   SR entry stores {snapshot_id, snap_file_id, created_at, label, live}
   Each snapshot owns a snap file (IS_SNAPSHOT_FILE) in Data Region
-  Snap file: flat array of {start_lba, length_blocks, seg_index, file_id, created_at}
+  Snap file: flat array of {start_lba, length_blocks, ext_index, file_id, created_at}
   snapshot_id on superseded segment = newest live snapshot with created_at > segment.created_at
   SNAPSHOT_DELETE transfers blocks to previous live snapshot if created_at > block.created_at
 - IS_SNAPSHOT_SEG removed: snapshot ownership determined by created_at comparison
@@ -1724,8 +1787,8 @@ GC + Snapshot interaction formalized. IR Expansion moved to Phase 1.
 - version field split: u32 → {major u8, minor u8, patch u16} in BH and EOP
 - version field removed from all other structures (SMI, DLI, WIA)
 - DLI Header: entry_size field removed (constant 24B)
-- Extent: seg_start_index and seg_count removed → {start_lba u64, length_blocks u64, seg_index u32} — 20 bytes
-- Minimum partition size: 64 MB
+- Extent: seg_start_index and seg_count removed → {start_lba u64, length_blocks u64, ext_index u32} — 20 bytes
+- Minimum partition size: 16 MB
 - Full atomics write path formalized for all operations: CREATE, COW_WRITE, COW_DEFRAG, COW_EXPAND, TRUNCATE, DELETE, RENAME, SNAPSHOT_CREATE, SNAPSHOT_DELETE
 
 ---
