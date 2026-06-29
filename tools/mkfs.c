@@ -9,12 +9,32 @@
 struct mkfs_args {
 	char *label;
 	char *device;
+	char *parent_dev;
 	int size_mb;
 	int force; 
 	int dev_type; /* 0 = disk image; 1 = block device */
 	int op_type; /* 0 = create new disk image; 1 = format*/
+	int is_disk_part; /* 0 = whole disk; 1 = disk partition */
+	int parent_dev_access; /* 1 = no access to parent device */
 	double sr_percent;
 };
+
+struct dev_params {
+	int fd;
+
+	uint64_t size_bytes;
+	uint64_t parent_dev_size_bytes;
+	uint32_t logical_sector_size; /* only 4Kn & 512e supported */
+	uint32_t physical_sector_size; /* only 4KB physical sector size supported */
+};
+
+struct protective_mba {
+
+} __packed;
+
+struct gpt_header {
+
+} __packed;
 
 static uint32_t crc32_table[256];
 
@@ -57,7 +77,7 @@ int parse_args(int argc, char *argv[], struct mkfs_args *args)
 		switch (opt) {
 		case 'h': 
 			help();
-			return 0;
+			return 1;
 		case 'l':
 			if (strlen(optarg) <= 255) {
 				args->label = optarg;
@@ -208,6 +228,49 @@ int check_disk (struct mkfs_args *args)
 			return ERR_INVALID;
 		}
 	}
+	
+}
+
+int check_disk_type(struct mkfs_args *args)
+{
+	char *tmp = strdup(args->device);
+	if (!tmp) {
+		fprintf(stderr, "mkfs.resfs: error: unknown error\n");
+		return ERR_INVALID;
+	}
+	char *bn = basename(tmp);
+	char path[4096];
+	char disk_path[4096];
+	char rp[4096];
+	char parent_dev[4096];
+
+	snprintf(path, sizeof(path), "/sys/class/block/%s/partition", bn);
+	snprintf(disk_path, sizeof(disk_path), "/sys/class/block/%s", bn);
+
+	if (access(path, F_OK) == 0) {
+		args->is_disk_part = 1;
+		if (realpath(disk_path, rp)) {
+			char *pdir = dirname(rp);
+			char *pdisk = basename(pdir);
+			snprintf(parent_dev, sizeof(parent_dev), "/dev/%s", pdisk);
+			free(tmp);
+			if (access(parent_dev, W_OK | R_OK)) {
+				args->parent_dev = parent_dev;
+				args->parent_dev_access = 1;
+				return 0;
+			}
+			else {
+				return 0;
+			}
+		}
+		else {
+			fprintf(stderr, "mkfs.resfs: error: failed to resolve device path\n");
+			free(tmp);
+			return ERR_INVALID;
+		}
+	}
+	free(tmp);
+	return 0;
 }
 
 int confirm(struct mkfs_args *args) {
@@ -215,23 +278,12 @@ int confirm(struct mkfs_args *args) {
 		return 0;
 	}
 	else if (args->dev_type == 1) {
-		printf("You are going to format an existing block device!\n");
-		printf("Continue? [Y/n]: ");
-		char ans = getchar();
-		if (ans == 'Y' || ans == 'y') {
-			printf("\n");
-			return 0;
-		}
-		else {
-			printf("\n");
-			return 1;
-		}
-	}
-	else if (args->dev_type == 0) {
-		if (args->op_type) {
-			printf("You are going to format an existing disk image!\n");
-			printf("Continue? [Y/n]: ");
+		if (args->is_disk_part) {
+			printf("You are going to format a disk partition: %s!\n", args->device);
+			printf("This operation will erase all data on the partition. Continue? [Y/n]: ");
 			char ans = getchar();
+			int c;
+			while ((c = getchar()) != '\n' && c != EOF);
 			if (ans == 'Y' || ans == 'y') {
 				printf("\n");
 				return 0;
@@ -242,9 +294,43 @@ int confirm(struct mkfs_args *args) {
 			}
 		}
 		else {
-			printf("You are going to create a disk image.\n");
+			printf("You are going to format a block device: %s!\n", args->device);
+			printf("This operation will erase all data on the disk. Continue? [Y/n]: ");
+			char ans = getchar();
+			int c;
+			while ((c = getchar()) != '\n' && c != EOF);
+			if (ans == 'Y' || ans == 'y') {
+				printf("\n");
+				return 0;
+			}
+			else {
+				printf("\n");
+				return 1;
+			}
+		}
+	}
+	else if (args->dev_type == 0) {
+		if (args->op_type) {
+			printf("You are going to format an existing disk image: %s!\n", args->device);
+			printf("This operation will erase all data on the disk image. Continue? [Y/n]: ");
+			char ans = getchar();
+			int c;
+			while ((c = getchar()) != '\n' && c != EOF);
+			if (ans == 'Y' || ans == 'y') {
+				printf("\n");
+				return 0;
+			}
+			else {
+				printf("\n");
+				return 1;
+			}
+		}
+		else {
+			printf("You are going to create a disk image %s.\n", args->device);
 			printf("Continue? [Y/n]: ");
 			char ans = getchar();
+			int c;
+			while ((c = getchar()) != '\n' && c != EOF);
 			if (ans == 'Y' || ans == 'y') {
 				printf("\n");
 				return 0;
@@ -261,9 +347,142 @@ int confirm(struct mkfs_args *args) {
 	}
 }
 
-
+int get_params(struct mkfs_args *args, struct dev_params *params)
+{
+	if (args->dev_type) {
+		if (args->is_disk_part) {
+			if (!args->parent_dev_access) {
+				int part_fd = open(args->device, O_RDWR);
+				if (part_fd == -1) {
+					fprintf(stderr, "mkfs.resfs: error: failed to open partition\n");
+					return ERR_INVALID;
+				}
+				if (ioctl(part_fd, BLKGETSIZE64, &params->size_bytes) == -1) {
+					fprintf(stderr, "mkfs.resfs: error: failed to determine partition size\n");
+					close(part_fd);
+					return ERR_INVALID;
+				}
+				else {
+					close(part_fd);
+				}
+				int pdev_fd = open(args->parent_dev, O_RDWR);
+				if (pdev_fd == -1) {
+					fprintf(stderr, "mkfs.resfs: error: failed to open block device\n");
+					return ERR_INVALID;
+				}
+				if (ioctl(pdev_fd, BLKGETSIZE64, &params->parent_dev_size_bytes) == -1) {
+					fprintf(stderr, "mkfs.resfs: error: failed to determine block device size\n");
+					close(pdev_fd);
+					return ERR_INVALID;
+				}
+				if (ioctl(pdev_fd, BLKSSZGET, &params->logical_sector_size) == -1) {
+					fprintf(stderr, "mkfs.resfs: error: failed to determine logical sector size\n");
+					close(pdev_fd);
+					return ERR_INVALID;
+				}
+				if (ioctl(pdev_fd, BLKPBSZGET, &params->physical_sector_size) == -1) {
+					fprintf(stderr, "mkfs.resfs: error: failed to determine physical sector size\n");
+					close(pdev_fd);
+					return ERR_INVALID;
+				}
+				if (params->physical_sector_size != 4096) {
+					fprintf(stderr, "mkfs.resfs: error: unsupported physical block size (must be 4KB)\n");
+					close(pdev_fd);
+					return ERR_INVALID;
+				}
+				else {
+					close(pdev_fd);
+					return 0;
+				}
+			}
+			else {
+				int part_fd = open(args->device, O_RDWR);
+				if (part_fd == -1) {
+					fprintf(stderr, "mkfs.resfs: error: failed to open partition\n");
+					return ERR_INVALID;
+				}
+				if (ioctl(part_fd, BLKGETSIZE64, &params->size_bytes) == -1) {
+					fprintf(stderr, "mkfs.resfs: error: failed to determine partition size\n");
+					close(part_fd);
+					return ERR_INVALID;
+				}
+				if (ioctl(part_fd, BLKSSZGET, &params->logical_sector_size) == -1) {
+					fprintf(stderr, "mkfs.resfs: error: failed to determine logical sector size\n");
+					close(part_fd);
+					return ERR_INVALID;
+				}
+				if (ioctl(part_fd, BLKPBSZGET, &params->physical_sector_size) == -1) {
+					fprintf(stderr, "mkfs.resfs: error: failed to determine physical sector size\n");
+					close(part_fd);
+					return ERR_INVALID;
+				}
+				if (params->physical_sector_size != 4096) {
+					fprintf(stderr, "mkfs.resfs: error: unsupported physical block size (must be 4KB)\n");
+					close(part_fd);
+					return ERR_INVALID;
+				}
+				else {
+					close(part_fd);
+					return 0;
+				}
+			}
+		}
+		else {
+			int fd = open(args->device, O_RDWR);
+			if (fd == -1) {
+				fprintf(stderr, "mkfs.resfs: error: failed to open block device\n");
+				return ERR_INVALID;
+			}
+			if (ioctl(fd, BLKGETSIZE64, &params->size_bytes) == -1) {
+				fprintf(stderr, "mkfs.resfs: error: failed to determine block device size\n");
+				close(fd);
+				return ERR_INVALID;
+			}
+			if (ioctl(fd, BLKSSZGET, &params->logical_sector_size) == -1) {
+				fprintf(stderr, "mkfs.resfs: error: failed to determine logical sector size\n");
+				close(fd);
+				return ERR_INVALID;
+			}
+			if (ioctl(fd, BLKPBSZGET, &params->physical_sector_size) == -1) {
+				fprintf(stderr, "mkfs.resfs: error: failed to determine physical sector size\n");
+				close(fd);
+				return ERR_INVALID;
+			}
+			if (params->physical_sector_size != 4096) {
+				fprintf(stderr, "mkfs.resfs: error: unsupported physical block size (must be 4KB)\n");
+				close(fd);
+				return ERR_INVALID;
+			}
+			else {
+				close(fd);
+				return 0;
+			}
+		}
+	}
+	else {
+		/*tbd*/
+	}
+	return 1;
+}
 
 int create_image()
+{
+	return 0;
+}
+
+int calc_layout()
+{
+	return 0;
+}
+
+
+int write_lba(struct dev_params *dev,
+	uint64_t lba,
+	const void *buf,
+	size_t len)
+{
+
+}		int write_gpt()
 {
 	return 0;
 }
@@ -292,13 +511,45 @@ int main(int argc, char *argv[])
 {
 	crc32_init();
 	struct mkfs_args args = {0};
-	if (parse_args(argc, argv, &args)) {
+	struct dev_params params = {0};
+
+	int ret = parse_args(argc, argv, &args);
+	if (ret == 1) {
+		return 0;
+	}
+
+	else if (ret) {
 		return 1;
 	}
+
 	if (check_disk(&args)) {
 		return 1;
 	}
+
+	if (args.dev_type) {
+		if (check_disk_type(&args)) {
+			return 1;
+		}
+	}
+
 	if (confirm(&args)) {
 		return 1;
 	}
+
+	
+	if (args.op_type) {
+		if (get_params(&args, &params)) {
+			return 1;
+		}
+	}
+
+	else {
+		if (create_image(&args)) {
+			return 1;
+		}
+	}
+
+	/*tbd*/
+
+	return 0;
 }
