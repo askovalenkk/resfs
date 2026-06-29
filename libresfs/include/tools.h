@@ -1,3 +1,9 @@
+/*
+*  resfs/libresfs/include/tools.h
+*  SPDX-License-Identifier: MIT
+*  Copyright (c) 2026 Andrei Kovalenko
+*/
+
 #ifndef TOOLS_H
 #define TOOLS_H
 
