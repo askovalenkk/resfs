@@ -481,8 +481,10 @@ int write_lba(struct dev_params *dev,
 	const void *buf,
 	size_t len)
 {
+	return 0;
+}		
 
-}		int write_gpt()
+int write_gpt()
 {
 	return 0;
 }
