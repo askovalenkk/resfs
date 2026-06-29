@@ -21,10 +21,17 @@ tools/%: tools/%.c libresfs.a
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-test: libresfs/src/test.c
-	$(CC) $(CFLAGS) $< -o /dev/null
-
 clean:
 	rm -f $(LIB_OBJS) libresfs.a $(TOOLS)
 
-.PHONY: all test clean
+install: $(TOOLS)
+	install -m 755 tools/mkfs /usr/local/bin/mkfs.resfs
+	install -m 755 tools/verify /usr/local/bin/resfs-verify
+	install -m 755 tools/recover /usr/local/bin/resfs-recover
+	install -m 755 tools/snap /usr/local/bin/resfs-snap
+	install -m 755 tools/export /usr/local/bin/resfs-export
+	install -m 755 tools/import /usr/local/bin/resfs-import
+	install -m 755 tools/visualize /usr/local/bin/resfs-visualize
+
+.PHONY: all clean install
+include local.mk

@@ -137,6 +137,21 @@ Removes all compiled objects, `libresfs.a` and tool binaries:
 make clean
 ```
 
+### Install
+Installs `mkfs.resfs` to `/usr/local/bin/`:
+```bash
+sudo make install
+```
+
+After installation, you can use these commands from your CLI:
+- `mkfs.resfs`
+- `resfs-verify`
+- `resfs-recover`
+- `resfs-snap`
+- `resfs-export`
+- `resfs-import`
+- `resfs-visualize`
+
 # Testing
 
 After cloning it with the command:

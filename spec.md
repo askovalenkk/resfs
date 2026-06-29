@@ -830,10 +830,11 @@ Power loss after step 5: new BH valid → new IRs valid.
 
 **Capacity on 1TB disk:**
 
-| ir_size | files supported |
-|---------|----------------|
-| 0.2% (~2GB) | ~55M files  |
-| 0.5% (~5GB) | ~137M files |
+| ir_size     | files supported |
+| ----------- | --------------- |
+| 0.2% (~2GB) | ~55M files      |
+| 0.5% (~5GB) | ~137M files     |
+
 ---
 
 ## Segment Layout (4096 bytes total)
