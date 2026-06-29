@@ -270,6 +270,9 @@ MIN_IR_BLOCKS  = 128 (512KB per IR copy)
 buffer_blocks      = max(MIN_BUFFER_BLOCKS, total_blocks * 3 / 1000)  (~0.3% per buffer)
 MIN_BUFFER_BLOCKS  = 192 (768KB per buffer)
 
+sr_size = max(RESFS_MIN_SR_BLOCKS, total_blocks * 2 / 1000)  (~0.2% of partition)
+MIN_SR_BLOCKS = 8 (32KB)
+
 wia_start   = 1
 sr_start    = wia_start + wia_size
 ir1_start   = sr_start + sr_size
@@ -1628,7 +1631,6 @@ disks directly via POSIX `pread`/`pwrite`.
 ## Requirements and Limitations
 
 - Minimum partition size: 16 MB
-- Minimum block size: 4096 bytes (fixed)
 - Maximum partition size: 64 ZiB (u64 LBA × 4KB blocks)
 - Maximum files per partition: 2^64 (u64 file_id counter)
 - Maximum file size: 183 extents × u64 length_blocks × 4KB
