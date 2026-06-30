@@ -23,4 +23,4 @@
 
 #include "resfs.h"
 
-#endif /* TOOLS_H */#include <limits.h>
+#endif /* TOOLS_H */
