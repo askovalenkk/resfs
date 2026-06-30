@@ -1,4 +1,4 @@
-<img width="1000" alt="ResFS Specification v2.0" src="https://github.com/user-attachments/assets/c5bfe8d6-e965-4581-b919-c014080adac6" />
+<img width="1000" alt="ResFS Specification v2.0" src="https://github.com/user-attachments/assets/a4fb2c42-79d5-45f2-a739-597b0282f63e" />
 
 > Recovery-First Filesystem — every physically intact segment is recoverable, deterministically, without heuristics, even if all metadata is destroyed.
 
