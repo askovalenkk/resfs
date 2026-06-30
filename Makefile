@@ -3,7 +3,7 @@
 #  Copyright (c) 2026 Andrei Kovalenko
 
 CC = gcc
-CFLAGS = -Ilibresfs/include -Ilibresfs/vendor/blake3 -Wall -Wextra -Wpedantic -g
+CFLAGS = -Ilibresfs/include -Ilibresfs/vendor/blake3 -Itools/include -Wall -Wextra -Wpedantic -g
 OBJDIR = build
 
 LIB_SRCS = $(wildcard libresfs/src/*.c) $(wildcard libresfs/vendor/blake3/*.c)
