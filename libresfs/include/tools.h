@@ -14,11 +14,13 @@
 #include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <sys/stat.h>
 #include <libgen.h>
+#include <limits.h>
+
+#include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <linux/fs.h>
 
 #include "resfs.h"
 
-#endif /* TOOLS_H */
+#endif /* TOOLS_H */#include <limits.h>
