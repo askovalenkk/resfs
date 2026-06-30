@@ -12,6 +12,7 @@ struct mkfs_args {
 	char parent_dev[PATH_MAX];
 	int size_mb;
 	int force; 
+	int partition_number;
 	int dev_type; /* 0 = disk image; 1 = block device */
 	int op_type; /* 0 = create new disk image; 1 = format*/
 	int is_disk_part; /* 0 = whole disk; 1 = disk partition */
@@ -249,6 +250,11 @@ int check_disk_type(struct mkfs_args *args)
 
 	if (access(path, F_OK) == 0) {
 		args->is_disk_part = 1;
+		FILE *f = fopen(path, "r");
+		if (f) {
+			fscanf(f, "%d", &args->partition_number);
+			fclose(f);
+		}
 		if (realpath(disk_path, rp)) {
 			char *pdir = dirname(rp);
 			char *pdisk = basename(pdir);
@@ -411,6 +417,7 @@ int create_image(struct mkfs_args *args, struct dev_params *params)
 	if (fallocate(fd, 0, 0, params->size_bytes) == -1) {
 		fprintf(stderr, "mkfs.resfs: error: failed to create a disk image\n");
 		close(fd);
+		unlink(args->device);
 		return ERR_INVALID;
 	}
 	params->fd = fd;
@@ -419,7 +426,7 @@ int create_image(struct mkfs_args *args, struct dev_params *params)
 	return 0;
 }
 
-int calc_layout()
+int calc_layout(struct dev_params *params, struct resfs_bh *bh)
 {
 	return 0;
 }
