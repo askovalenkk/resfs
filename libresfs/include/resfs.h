@@ -119,8 +119,9 @@ struct resfs_bh {
 	uint64_t data2_start;                               
 	uint64_t start_of_partition;
 	uint64_t partition_size;
+	uint32_t logical_block_size;
 	uint8_t blake3_hash[32];
-	uint8_t reserved[3668];
+	uint8_t reserved[3664];
 } __packed;
 
 _Static_assert(sizeof(struct resfs_bh) == 4096, "resfs_bh must be 4096 bytes");
@@ -137,18 +138,19 @@ struct resfs_eop {
 	uint32_t feature_flags;
 	uint64_t wia_start;
 	uint64_t wia_size;
+	uint64_t sr_start;
+	uint64_t sr_size;
 	uint64_t ir1_start;
 	uint64_t ir2_start;
 	uint64_t ir3_start;
 	uint64_t ir_size;
-	uint64_t sr_start;
-	uint64_t sr_size;
 	uint64_t data1_start;
 	uint64_t data2_start;
 	uint64_t start_of_partition_lba;
 	uint64_t partition_size;
+	uint32_t logical_block_size;
 	uint8_t blake3_hash[32];
-	uint8_t reserved[3654];
+	uint8_t reserved[3650];
 	uint8_t eop_tail[22];
 } __packed;
 

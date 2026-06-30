@@ -239,9 +239,10 @@ Offset  Size    Field              Description
 364     8       data1_start        u64, LBA of Data Region 1
 372     8       data2_start        u64, LBA of Data Region 2
 380     8       start_of_partition u64, Absolute LBA of the first block
-388     8       partition_size     u64, Partition size in blocks
-396     32      blake3_hash        BLAKE3 of bytes [0..395]
-428     3668    reserved           Must be zero (pad to 4096 bytes)
+388     8       partition_size     u64, Partition size in logical blocks
+396     4       logical_block_size u32, Logical block size of the partition
+400     32      blake3_hash        BLAKE3 of bytes [0..399]
+432     3668    reserved           Must be zero (pad to 4096 bytes)
 ```
 
 ### Feature Flags
@@ -342,9 +343,10 @@ Offset  Size    Field           Description
 356     8       data1_start        u64, LBA of Data Region 1
 364     8       data2_start        u64, LBA of Data Region 2
 372     8       start_of_partition u64, Absolute LBA of the first block
-380     8       partition_size     u64, Partition size in blocks
-388     32      blake3_hash        BLAKE3 of bytes [0..387]
-420     3654    reserved           Must be zero
+380     8       partition_size     u64, Partition size in logical blocks
+388     4       logical_block_size u32, Logical block size of the partition
+392     32      blake3_hash        BLAKE3 of bytes [0..391]
+424     3650    reserved           Must be zero
 4074    22      EOP_TAIL           "END OF RESFS PARTITION"
 ```
 
