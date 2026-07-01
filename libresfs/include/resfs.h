@@ -9,6 +9,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include "version.h"
 
 /* ResFS signatures */
 #define BH_SIG "RESFS PARTITION "
@@ -103,6 +104,7 @@ struct resfs_bh {
 	uint8_t version_minor;
 	uint16_t version_patch;
 	uint32_t block_size;
+	uint64_t total_blocks;
 	uint8_t fs_uuid[16];
 	uint8_t label_len;
 	uint8_t fs_label[255];
@@ -121,7 +123,7 @@ struct resfs_bh {
 	uint64_t partition_size;
 	uint32_t logical_sector_size;
 	uint8_t blake3_hash[32];
-	uint8_t reserved[3664];
+	uint8_t reserved[3656];
 } __packed;
 
 _Static_assert(sizeof(struct resfs_bh) == 4096, "resfs_bh must be 4096 bytes");
@@ -132,6 +134,7 @@ struct resfs_eop {
 	uint8_t version_minor;
 	uint16_t version_patch;
 	uint32_t block_size;
+	uint64_t total_blocks;
 	uint8_t fs_uuid[16];
 	uint8_t label_len;
 	uint8_t fs_label[255];
@@ -150,7 +153,7 @@ struct resfs_eop {
 	uint64_t partition_size;
 	uint32_t logical_sector_size;
 	uint8_t blake3_hash[32];
-	uint8_t reserved[3650];
+	uint8_t reserved[3642];
 	uint8_t eop_tail[22];
 } __packed;
 

@@ -224,25 +224,26 @@ Offset  Size    Field                    Description
 17      1       version_minor            u8
 18      2       version_patch            u16
 20      4       block_size               u32, always 4096
-24      16      fs_uuid                  UUID of this filesystem instance
-40      1       label_len                u8, length of fs_label
-41      255     fs_label                 UTF-8 filesystem label, null-padded
-296     4       feature_flags            u32, see Feature Flags section
-300     8       wia_start                u64, LBA of WIA Region (always 1)
-308     8       wia_size                 u64, size of WIA Region in blocks
-316     8       sr_start                 u64, LBA of Snapshot Region
-324     8       sr_size                  u64, size of Snapshot Region in blocks
-332     8       ir1_start                u64, LBA of IR1 (fixed at mkfs, never changes)
-340     8       ir2_start                u64, LBA of IR2 (fixed at mkfs, never changes)
-348     8       ir3_start                u64, LBA of IR3 (moves left on expansion)
-356     8       ir_size                  u64, current size of each IR in blocks (grows on expansion)
-364     8       data1_start              u64, LBA of Data Region 1
-372     8       data2_start              u64, LBA of Data Region 2
-380     8       start_of_partition       u64, Absolute LBA of the first logical sector
-388     8       partition_size           u64, Partition size in logical sectors
-396     4       logical_sector_size      u32, Logical dector size of the partition
-400     32      blake3_hash              BLAKE3 of bytes [0..399]
-432     3668    reserved                 Must be zero (pad to 4096 bytes)
+24      8       total_blocks             u64, total number of 4096-byte blocks in the partition
+32      16      fs_uuid                  UUID of this filesystem instance
+48      1       label_len                u8, length of fs_label
+49      255     fs_label                 UTF-8 filesystem label, null-padded
+304     4       feature_flags            u32, see Feature Flags section
+308     8       wia_start                u64, LBA of WIA Region (always 1)
+316     8       wia_size                 u64, size of WIA Region in blocks
+324     8       sr_start                 u64, LBA of Snapshot Region
+332     8       sr_size                  u64, size of Snapshot Region in blocks
+340     8       ir1_start                u64, LBA of IR1 (fixed at mkfs, never changes)
+348     8       ir2_start                u64, LBA of IR2 (fixed at mkfs, never changes)
+356     8       ir3_start                u64, LBA of IR3 (moves left on expansion)
+364     8       ir_size                  u64, current size of each IR in blocks (grows on expansion)
+372     8       data1_start              u64, LBA of Data Region 1
+380     8       data2_start              u64, LBA of Data Region 2
+388     8       start_of_partition       u64, Absolute LBA of the first logical sector
+396     8       partition_size           u64, Partition size in logical sectors
+404     4       logical_sector_size      u32, Logical sector size of the partition
+408     32      blake3_hash              BLAKE3 of bytes [0..407]
+440     3656    reserved                 Must be zero (pad to 4096 bytes)
 ```
 
 ### Feature Flags
@@ -328,25 +329,26 @@ Offset  Size    Field                   Description
 9       1       version_minor           u8
 10      2       version_patch           u16
 12      4       block_size              u32, always 4096
-16      16      fs_uuid                 UUID of this filesystem instance
-32      1       label_len               u8, length of fs_label
-33      255     fs_label                UTF-8 filesystem label, null-padded
-288     4       feature_flags           u32, see Feature Flags section
-292     8       wia_start               u64, LBA of WIA Region (always 1)
-300     8       wia_size                u64, size of WIA Region in blocks
-308     8       sr_start                u64, LBA of Snapshot Region
-316     8       sr_size                 u64, size of Snapshot Region in blocks
-324     8       ir1_start               u64, LBA of IR1
-332     8       ir2_start               u64, LBA of IR2
-340     8       ir3_start               u64, LBA of IR3
-348     8       ir_size                 u64, current size of each IR in blocks
-356     8       data1_start             u64, LBA of Data Region 1
-364     8       data2_start             u64, LBA of Data Region 2
-372     8       start_of_partition      u64, Absolute LBA of the first logical sector
-380     8       partition_size          u64, Partition size in logical sectors
-388     4       logical_sector_size     u32, Logical sector size of the partition
-392     32      blake3_hash             BLAKE3 of bytes [0..391]
-424     3650    reserved                Must be zero
+16      8       total_blocks            u64, total number of 4096-byte blocks in the partition
+24      16      fs_uuid                 UUID of this filesystem instance
+40      1       label_len               u8, length of fs_label
+41      255     fs_label                UTF-8 filesystem label, null-padded
+296     4       feature_flags           u32, see Feature Flags section
+300     8       wia_start               u64, LBA of WIA Region (always 1)
+308     8       wia_size                u64, size of WIA Region in blocks
+316     8       sr_start                u64, LBA of Snapshot Region
+324     8       sr_size                 u64, size of Snapshot Region in blocks
+332     8       ir1_start               u64, LBA of IR1
+340     8       ir2_start               u64, LBA of IR2
+348     8       ir3_start               u64, LBA of IR3
+356     8       ir_size                 u64, current size of each IR in blocks
+364     8       data1_start             u64, LBA of Data Region 1
+372     8       data2_start             u64, LBA of Data Region 2
+380     8       start_of_partition      u64, Absolute LBA of the first logical sector
+388     8       partition_size          u64, Partition size in logical sectors
+396     4       logical_sector_size     u32, Logical sector size of the partition
+400     32      blake3_hash             BLAKE3 of bytes [0..399]
+432     3642    reserved                Must be zero
 4074    22      EOP_TAIL                "END OF RESFS PARTITION"
 ```
 
