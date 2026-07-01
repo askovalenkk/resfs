@@ -2,7 +2,7 @@
 
 > Recovery-First Filesystem — every physically intact segment is recoverable, deterministically, without heuristics, even if all metadata is destroyed.
 
-## What ResFS Is (and Is Not)
+## What ResFS is (and is not)
 
 **ResFS is:**
 - A forensic-recovery-first filesystem
@@ -73,10 +73,10 @@ ResFS guarantees recovery of every physically intact segment.
 ResFS partition type GUID for GPT:
 
 ```
-52455346-494C-4553-5953-54454D2F414B
+46534552-4C49-5345-5953-54454D2F414B
 ```
 
-Encodes "RESFILESYSTEM/AK" in ASCII — filesystem name and author initials.
+When interpreted using the standard GUID mixed-endian byte order, it decodes to "RESFILESYSTEM/AK" in ASCII — filesystem name and author initials.
 Every ResFS partition on every disk carries this signature.
 This is part of the standard — permanent and immutable.
 
