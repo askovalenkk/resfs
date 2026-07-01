@@ -83,6 +83,7 @@
 #define DEVICE_TYPE_VIRT 0x03
 
 /* Partition constants */
+#define RESFS_BLOCK_SIZE 4096
 #define RESFS_FILE_ID_NULL 0
 #define RESFS_FILE_ID_ROOT 1
 #define RESFS_MIN_WIA_BLOCKS 8
