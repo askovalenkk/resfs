@@ -18,6 +18,7 @@
 #include <limits.h>
 
 #include <sys/stat.h>
+#include <sys/random.h>
 #include <sys/ioctl.h>
 #include <linux/fs.h>
 
