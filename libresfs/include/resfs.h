@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "version.h"
+#include "blake3.h"
 
 /* ResFS signatures */
 #define BH_SIG "RESFS PARTITION "
