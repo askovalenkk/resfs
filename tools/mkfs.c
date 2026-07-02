@@ -39,6 +39,8 @@ struct mbr_partition_entry {
 	uint32_t size_in_lba; /* 0xFFFFFFFF */
 } __packed;
 
+_Static_assert(sizeof(struct mbr_partition_entry) == 16, "MBR Partition Entry size must be 16 bytes");
+
 struct uuid { /* 128-bit RFC 4122 mixed-endian */
 	uint32_t data1;
 	uint16_t data2;
@@ -52,6 +54,8 @@ struct protective_mbr {
 	uint8_t unused_entries[3][16];
 	uint16_t boot_signature; /* 0x55AA */
 } __packed;
+
+_Static_assert(sizeof(struct protective_mbr) == 512, "Protective MBR size must be 512 bytes");
 
 struct gpt_header {
 	uint8_t signature[8]; /* "EFI PART" */
@@ -70,13 +74,22 @@ struct gpt_header {
 	uint32_t partition_entry_array_crc32;
 } __packed;
 
+_Static_assert(sizeof(struct gpt_header) == 92, "GPT Header size must be 92 bytes");
+
 struct gpt_partition_entry {
 	struct uuid partition_type_guid; /* ResFS official GUID */
 	struct uuid unique_partition_guid; /* UUIDv4 */
 	uint64_t starting_lba;
 	uint64_t ending_lba;
 	uint64_t attributes; /* Not used in v0.99.1 */
-	uint16_t partition_name[36]; /* UTF-16LE Partition name (default "ResFS Disk Partition") */
+	uint8_t partition_name[72]; /* UTF-16LE Partition name (default "ResFS Disk Partition") */
+} __packed;
+
+_Static_assert(sizeof(struct gpt_partition_entry) == 128, "GPT Partition Entry size must be 128 bytes");
+
+struct gpt_partition_entries {
+	struct gpt_partition_entry entry1;
+	struct gpt_partition_entry unused_entries[127];
 } __packed;
 
 static uint32_t crc32_table[256];
@@ -100,6 +113,27 @@ static uint32_t crc32(const void *buf, size_t len)
     	return c ^ 0xFFFFFFFF;
 }
 
+static void blake3_hash(const void *buf, size_t len, uint8_t out[32])
+{
+	blake3_hasher hasher;
+
+	blake3_hasher_init(&hasher);
+	blake3_hasher_update(&hasher, buf, len);
+	blake3_hasher_finalize(&hasher, out, 32);
+}
+
+static uint64_t blake3_hash_name(const char *name)
+{
+	blake3_hasher hasher;
+	uint8_t out[8];
+	blake3_hasher_init(&hasher);
+	blake3_hasher_update(&hasher, name, strlen(name));
+	blake3_hasher_finalize(&hasher, out, 8);
+	uint64_t hash;
+	memcpy(&hash, out, 8);
+	return hash;
+}
+
 static uint64_t align_up(uint64_t value, uint64_t alignment) 
 {
 	return ((value + alignment - 1) / alignment) * alignment;
@@ -115,6 +149,26 @@ static int generate_uuidv4(struct uuid *uuid)
 	return 0;
 }
 
+static uint64_t now_ns(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_REALTIME, &ts);
+	return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
+}
+
+static void ascii_to_utf16le(uint8_t dst[72], const char *src)
+{
+    while (*src) {
+        *dst++ = *src++;
+        *dst++ = 0;
+    }
+}
+
+static uint64_t max(uint64_t a, uint64_t b)
+{
+	return a > b ? a : b;
+}
+
 int help(void)
 {
 	printf("\n");
@@ -126,6 +180,16 @@ int help(void)
 	printf("  -c SIZE       Creates a disk partition with size set (in MB)\n");
 	printf("  -f            Force formatting without confirmation\n\n");
 	printf("  <device>      Path to the device or the filename of the disk image to be used\n");
+
+	return 0;
+}
+
+int gdisk_manual(void)
+{
+	printf("\n");
+	printf("GPT is not altered due to no access to parental block device.\n");
+	printf("Please update Partition Type GUID using gdisk or other utility.\n\n");
+	printf("ResFS Partition Type GUID: 52455346-494C-4553-5953-54454D2F414B.\n");
 
 	return 0;
 }
@@ -349,7 +413,7 @@ int confirm(struct mkfs_args *args, struct dev_params *params) {
 	}
 	else if (args->dev_type == 1) {
 		if (params->is_disk_part) {
-			printf("You are going to format a disk partition: %s!\n", args->device);
+			printf("You are going to format disk partition: %s!\n", args->device);
 			printf("This operation will erase all data on the partition. Continue? [Y/n]: ");
 			char ans = getchar();
 			int c;
@@ -364,7 +428,7 @@ int confirm(struct mkfs_args *args, struct dev_params *params) {
 			}
 		}
 		else {
-			printf("You are going to format a block device: %s!\n", args->device);
+			printf("You are going to format block device: %s!\n", args->device);
 			printf("This operation will erase all data on the disk. Continue? [Y/n]: ");
 			char ans = getchar();
 			int c;
@@ -381,7 +445,7 @@ int confirm(struct mkfs_args *args, struct dev_params *params) {
 	}
 	else if (args->dev_type == 0) {
 		if (args->op_type) {
-			printf("You are going to format an existing disk image: %s!\n", args->device);
+			printf("You are going to format existing disk image: %s!\n", args->device);
 			printf("This operation will erase all data on the disk image. Continue? [Y/n]: ");
 			char ans = getchar();
 			int c;
@@ -396,7 +460,7 @@ int confirm(struct mkfs_args *args, struct dev_params *params) {
 			}
 		}
 		else {
-			printf("You are going to create a disk image %s.\n", args->device);
+			printf("You are going to create disk image %s.\n", args->device);
 			printf("Continue? [Y/n]: ");
 			char ans = getchar();
 			int c;
@@ -440,11 +504,11 @@ int get_params(struct mkfs_args *args, struct dev_params *params)
 			close(fd);
 			return ERR_INVALID;
 		}
-		if (params->physical_sector_size != 4096) {
+		/* if (params->physical_sector_size != 4096) {
 			fprintf(stderr, "mkfs.resfs: error: unsupported physical block size (must be 4KB)\n");
 			close(fd);
 			return ERR_INVALID;
-		}
+		} */ 
 		else {
 			params->fd = fd;
 			return 0;
@@ -502,7 +566,7 @@ int get_pdev_params(struct mkfs_args *args, struct dev_params *params)
 	snprintf(path, sizeof(path), "/sys/class/block/%s/start", bn);
 	FILE *f = fopen(path, "r");
 	if (f) {
-		fscanf(f, "%llu", &params->part_start_lba);
+		fscanf(f, "%lu", &params->part_start_lba);
 		fclose(f);
 	}
 	if (!params->part_start_lba) {
@@ -529,16 +593,22 @@ int get_pdev_params(struct mkfs_args *args, struct dev_params *params)
 int calc_layout(struct dev_params *params, struct resfs_bh *bh)
 {
 	bh->block_size = RESFS_BLOCK_SIZE;
-	bh->total_blocks = params->size_bytes / 4096;
 	bh->logical_sector_size = params->logical_sector_size;
-	bh->partition_size = bh->total_blocks * 4096 / bh->logical_sector_size;
 
 	if (params->is_disk_part) {
 		bh->start_of_partition = params->part_start_lba;
+		bh->total_blocks = params->size_bytes / 4096;
+		bh->partition_size = bh->total_blocks * 4096 / bh->logical_sector_size;
 	} 
 	else {
 		uint64_t alignment_lba = 1048576 / params->logical_sector_size;
-		bh->start_of_partition = align_up(34, alignment_lba);
+		bh->start_of_partition = align_up(2 + 16384 / params->logical_sector_size, alignment_lba);
+		uint64_t secondary_reserved_lba = 1 + 16384 / params->logical_sector_size;
+		uint64_t last_usable_lba = (params->size_bytes / params->logical_sector_size - 1) - secondary_reserved_lba;
+		uint64_t usable_lba_count = last_usable_lba - bh->start_of_partition + 1;
+		uint64_t usable_bytes = usable_lba_count * params->logical_sector_size;
+		bh->total_blocks = usable_bytes / 4096;
+		bh->partition_size = bh->total_blocks * 4096 / bh->logical_sector_size;
 	}
 
 	bh->wia_size = max(RESFS_MIN_WIA_BLOCKS, bh->total_blocks / 1000);
@@ -596,42 +666,216 @@ int write_segment(struct resfs_bh *bh, struct dev_params *params, uint64_t start
 	return 0;
 }
 
-int alter_gpt()
+int build_protective_mbr(struct protective_mbr *mbr, struct dev_params *params) 
 {
+	mbr->entry.starting_chs[0] = 0x00;
+	mbr->entry.starting_chs[1] = 0x02;
+	mbr->entry.starting_chs[2] = 0x00;
+	mbr->entry.os_type = 0xEE;
+	mbr->entry.ending_chs[0] = 0xFF;
+	mbr->entry.ending_chs[1] = 0xFF;
+	mbr->entry.ending_chs[2] = 0xFF;
+	mbr->entry.starting_lba = 0x00000001;
+
+	uint64_t disk_lba_count = params->size_bytes / params->logical_sector_size;
+	if (disk_lba_count - 1 > 0xFFFFFFFF) {
+		mbr->entry.size_in_lba = 0xFFFFFFFF;
+	}
+	else {
+		mbr->entry.size_in_lba = disk_lba_count - 1;
+	}
+
+	mbr->boot_signature = 0x55AA;
+	return 0; 
+}
+
+int build_gpt_partition_entry(struct gpt_partition_entry *entry, struct uuid *part_guid, struct uuid *part_uuid, struct resfs_bh *bh)
+{
+        entry->partition_type_guid = *part_guid;
+        entry->unique_partition_guid = *part_uuid;
+        entry->starting_lba = bh->start_of_partition;
+        entry->ending_lba = bh->start_of_partition + bh->partition_size - 1;
+	ascii_to_utf16le(entry->partition_name, "ResFS Disk Partition");
 	return 0;
 }
 
-int write_gpt()
+int build_primary_gpt_header(struct gpt_header *gpt_h, struct dev_params *params, struct resfs_bh *bh, struct uuid *disk_guid)
 {
+	memcpy(gpt_h->signature, "EFI PART", 8);
+	gpt_h->revision = 0x00010000;
+	gpt_h->header_size = sizeof(struct gpt_header);
+	gpt_h->header_crc32 = 0;
+	gpt_h->my_lba = 1;
+	gpt_h->alternate_lba = params->size_bytes / params->logical_sector_size - 1;
+	gpt_h->first_usable_lba = bh->start_of_partition;
+	gpt_h->last_usable_lba = gpt_h->alternate_lba - 1 - 16384 / params->logical_sector_size;
+	gpt_h->disk_guid = *disk_guid;
+	gpt_h->partition_entry_lba = 2;
+	gpt_h->partition_entry_count = 128;
+	gpt_h->size_of_partition_entry = 128;
+	gpt_h->partition_entry_array_crc32 = 0;
 	return 0;
 }
 
-int write_bh()
+int build_secondary_gpt_header(struct gpt_header *gpt_h, struct gpt_header *primary_gpt_h, struct dev_params *params)
 {
+	memcpy(gpt_h->signature, "EFI PART", 8);
+        gpt_h->revision = 0x00010000;
+        gpt_h->header_size = sizeof(struct gpt_header);
+        gpt_h->header_crc32 = 0;
+        gpt_h->my_lba = primary_gpt_h->alternate_lba;
+        gpt_h->alternate_lba = primary_gpt_h->my_lba;
+        gpt_h->first_usable_lba = primary_gpt_h->first_usable_lba;
+        gpt_h->last_usable_lba = primary_gpt_h->last_usable_lba;
+        gpt_h->disk_guid = primary_gpt_h->disk_guid;
+        gpt_h->partition_entry_lba = gpt_h->my_lba - 16384 / params->logical_sector_size;
+        gpt_h->partition_entry_count = 128;
+        gpt_h->size_of_partition_entry = 128;
+        gpt_h->partition_entry_array_crc32 = 0;
+return 0;
+}
+
+int build_bh(struct resfs_bh *bh, struct mkfs_args *args, struct uuid *uuid)
+{
+	memcpy(bh->bh_sig, BH_SIG, 16);
+	bh->version_major = RESFS_VERSION_MAJOR;
+	bh->version_minor = RESFS_VERSION_MINOR;
+	bh->version_patch = RESFS_VERSION_PATCH;
+	memcpy(bh->fs_uuid, uuid, sizeof(*uuid));
+	if (args->label) {
+		bh->label_len = (uint8_t)strlen(args->label);
+		memcpy(bh->fs_label, args->label, bh->label_len);
+	} 
+	else {
+		bh->label_len = 0;
+	}
+	bh->feature_flags |= FEAT_SNAPSHOTS;
+	blake3_hash(bh, offsetof(struct resfs_bh, blake3_hash), bh->blake3_hash);
 	return 0;
 }
 
-int write_eop()
+int build_eop(struct resfs_eop *eop, struct resfs_bh *bh)
 {
+	memcpy(eop->eop_sig, EOP_SIG, 8);
+	eop->version_major = bh->version_major;
+	eop->version_minor = bh->version_minor;
+	eop->version_patch = bh->version_patch;
+	eop->block_size = bh->block_size;
+	eop->total_blocks = bh->total_blocks;
+	memcpy(eop->fs_uuid, bh->fs_uuid, sizeof(bh->fs_uuid));
+	eop->label_len = bh->label_len;
+	memcpy(eop->fs_label, bh->fs_label, eop->label_len);
+	eop->wia_start = bh->wia_start;
+	eop->wia_size = bh->wia_size;
+	eop->sr_start = bh->sr_start;
+	eop->sr_size = bh->sr_size;
+	eop->ir1_start = bh->ir1_start;
+	eop->ir2_start = bh->ir2_start;
+	eop->ir3_start = bh->ir3_start;
+	eop->ir_size = bh->ir_size;
+	eop->data1_start = bh->data1_start;
+	eop->data2_start = bh->data2_start;
+	eop->start_of_partition = bh->start_of_partition;
+	eop->partition_size = bh->partition_size;
+	eop->logical_sector_size = bh->logical_sector_size;
+	blake3_hash(eop, offsetof(struct resfs_eop, blake3_hash), eop->blake3_hash);
+	memcpy(eop->eop_tail, EOP_TAIL, 22);
 	return 0;
 }
 
-int write_ir1()
+int build_wia_h(struct resfs_wia_h *wia_h)
 {
+	memcpy(wia_h->wia_sig, WIA_SIG, 8);
+	wia_h->data_offset = 2;
 	return 0;
 }
 
-int write_ir2()
+int build_sr_h(struct resfs_sr_h *sr_h)
 {
+	memcpy(sr_h->sr_sig, SR_SIG, 8);
 	return 0;
 }
 
-int write_ir3()
+int build_smi_h(struct resfs_smi_h *smi_h, struct resfs_bh *bh)
 {
+	memcpy(smi_h->smi_sig, SMI_SIG, 8);
+	smi_h->used_blocks = 1;	
+	uint64_t smi_body_blocks = (bh->ir_size - 2) * 2 / 5;
+	smi_h->entry_count = smi_body_blocks * 4096 / sizeof(struct resfs_smi_entry);
 	return 0;
 }
 
-int write_root()
+int build_smi_root_entry(struct resfs_smi_entry *smi_entry, struct resfs_bh *bh)
+{
+	smi_entry->file_id = 1;
+	uint64_t buffer_blocks = max(RESFS_MIN_BUFFER_BLOCKS, bh->total_blocks * 3 / 1000);
+	smi_entry->seg0_lba = bh->data1_start + buffer_blocks;
+	return 0;
+}
+
+int build_dli_h(struct resfs_dli_h *dli_h, struct resfs_bh *bh, uint64_t ir_start)
+{
+	memcpy(dli_h->dli_sig, DLI_SIG, 8);
+	uint64_t smi_body_blocks = (bh->ir_size - 2) * 2 / 5;
+	uint64_t dli_body_blocks = (bh->ir_size - 2) - smi_body_blocks;
+	dli_h->entry_count = dli_body_blocks * 4096 / 24;
+	dli_h->data_offset = ir_start + smi_body_blocks + 2; 
+	return 0;
+}
+
+int build_dli_root_entry(struct resfs_dli_entry *dli_entry)
+{
+	dli_entry->name_hash = blake3_hash_name("/");
+	dli_entry->file_id = 1;
+	dli_entry->parent_dir_id = 0;
+	return 0;
+}
+
+int build_root_seg(struct resfs_inline_seg0 *root_seg)
+{
+	memcpy(root_seg->seg_sig, SEG_SIG, 8);
+	memcpy(root_seg->seg_end_sig, SEG_END_SIG, 8);
+	root_seg->file_id = 1;
+	root_seg->seg_index = 0;
+	root_seg->flags = IS_FIRST_SEG | IS_INLINE | IS_DIRECTORY;
+	root_seg->data_len = 10;
+	root_seg->created_at = now_ns();
+	memcpy(root_seg->filename, "/", 1);
+	root_seg->filename_len = 1;
+	root_seg->permissions = 0755;
+	root_seg->modified_at = root_seg->created_at;
+	memcpy(root_seg->data_region, ROOT_SIG, 10);
+	blake3_hash(root_seg->data_region, sizeof(root_seg->data_region), root_seg->blake3_hash);
+	root_seg->file_id_end = 1;
+	root_seg->seg_index_end = 0;
+	return 0;
+}
+
+int write_primary_gpt(struct dev_params *params, struct protective_mbr *mbr, struct gpt_header *primary_gpt_h, struct gpt_partition_entries *entries)
+{
+	write_lba(params->fd, 0, params, mbr, sizeof(struct protective_mbr));
+	write_lba(params->fd, 1, params, primary_gpt_h, sizeof(struct gpt_header));
+	write_lba(params->fd, 2, params, &entries->entry1, sizeof(struct gpt_partition_entry));
+	uint64_t n = 16384 / params->logical_sector_size;
+	for (uint64_t i = 1; i < n; i++) {
+		write_lba(params->fd, 2 + i, params, entries, 0);
+	}
+	return 0;
+}
+
+int write_secondary_gpt(struct dev_params *params, struct gpt_header *secondary_gpt_h, struct gpt_partition_entries *entries)
+{
+	uint64_t n = 16384 / params->logical_sector_size;
+	write_lba(params->fd, secondary_gpt_h->partition_entry_lba, params, &entries->entry1, sizeof(struct gpt_partition_entry));
+	for (uint64_t i = 1; i < n; i++) {
+		write_lba(params->fd, secondary_gpt_h->partition_entry_lba + i, params, entries, 0);
+	}
+	write_lba(params->fd, secondary_gpt_h->my_lba, params, secondary_gpt_h, sizeof(struct gpt_header));
+	return 0;
+}
+
+/* GPT modification for disk partitions will be added later */
+int alter_gpt() 
 {
 	return 0;
 }
@@ -641,8 +885,42 @@ int main(int argc, char *argv[])
 	crc32_init();
 	struct mkfs_args args = {0};
 	struct dev_params params = {0};
+	struct protective_mbr mbr = {0};
+	struct gpt_header primary_gpt_h = {0};
+	struct gpt_partition_entry entry = {0};
+	struct gpt_header secondary_gpt_h = {0};
+	struct gpt_partition_entries entries = {0};
 	struct resfs_bh bh = {0};
 	struct resfs_eop eop = {0};
+	struct resfs_wia_h wia_h = {0};
+	struct resfs_sr_h sr_h = {0};
+	struct resfs_smi_h smi_h1 = {0};
+	struct resfs_dli_h dli_h1 = {0};
+	struct resfs_smi_entry smi_entry1 = {0};
+	struct resfs_dli_entry dli_entry1 = {0};
+	struct resfs_smi_h smi_h2 = {0};
+	struct resfs_dli_h dli_h2 = {0};
+	struct resfs_smi_entry smi_entry2 = {0};
+	struct resfs_dli_entry dli_entry2 = {0};
+	struct resfs_smi_h smi_h3 = {0};
+	struct resfs_dli_h dli_h3 = {0};
+	struct resfs_smi_entry smi_entry3 = {0};
+	struct resfs_dli_entry dli_entry3 = {0};
+	struct resfs_inline_seg0 root_seg = {0};
+	struct uuid disk_guid = {0};
+	struct uuid part_uuid = {0};
+	struct uuid part_guid = {0};
+	part_guid.data1 = 0x46534552;
+	part_guid.data2 = 0x4C49;
+	part_guid.data3 = 0x5345;
+	part_guid.data4[0] = 0x59;
+	part_guid.data4[1] = 0x53;
+	part_guid.data4[2] = 0x54;
+	part_guid.data4[3] = 0x45;
+	part_guid.data4[4] = 0x4D;
+	part_guid.data4[5] = 0x2F;
+	part_guid.data4[6] = 0x41;
+	part_guid.data4[7] = 0x4B;
 
 	int ret = parse_args(argc, argv, &args);
 	if (ret == 1) {
@@ -683,14 +961,76 @@ int main(int argc, char *argv[])
 	if (args.dev_type) {
 		if (params.is_disk_part) {
 			if (!params.no_parent_dev_access) {
-				if (get_pdev_params(&args, &params)) {
-					return 1;
-				}
+				printf("mkfs.resfs: error: disk partition formatting is not yet implemented");
+				goto cleanup;
 			}
 		}
 	}
 
-	/*tbd*/
+	calc_layout(&params, &bh);
+
+	if (generate_uuidv4(&part_uuid) || generate_uuidv4(&disk_guid)) {
+		goto cleanup;
+	}
+
+	build_protective_mbr(&mbr, &params);
+	build_gpt_partition_entry(&entry, &part_guid, &part_uuid, &bh);
+	build_primary_gpt_header(&primary_gpt_h, &params, &bh, &disk_guid);
+	build_secondary_gpt_header(&secondary_gpt_h, &primary_gpt_h, &params);
+	entries.entry1 = entry;
+	primary_gpt_h.partition_entry_array_crc32 = crc32(&entries, sizeof(struct gpt_partition_entries));
+	primary_gpt_h.header_crc32 = crc32(&primary_gpt_h, sizeof(struct gpt_header));
+	
+	secondary_gpt_h.partition_entry_array_crc32 = crc32(&entries, sizeof(struct gpt_partition_entries));
+	secondary_gpt_h.header_crc32 = crc32(&secondary_gpt_h, sizeof(struct gpt_header));
+
+	build_bh(&bh, &args, &part_uuid);
+	build_eop(&eop, &bh);
+	build_wia_h(&wia_h);
+	build_sr_h(&sr_h);
+	build_smi_h(&smi_h1, &bh);
+	build_smi_root_entry(&smi_entry1, &bh);
+	build_dli_h(&dli_h1, &bh, bh.ir1_start);
+	build_dli_root_entry(&dli_entry1);
+
+	build_smi_h(&smi_h2, &bh);
+	build_smi_root_entry(&smi_entry2, &bh);
+	build_dli_h(&dli_h2, &bh, bh.ir2_start);
+	build_dli_root_entry(&dli_entry2);
+
+	build_smi_h(&smi_h3, &bh);
+	build_smi_root_entry(&smi_entry3, &bh);
+	build_dli_h(&dli_h3, &bh, bh.ir3_start);
+	build_dli_root_entry(&dli_entry3);
+
+	build_root_seg(&root_seg);
+
+	write_primary_gpt(&params, &mbr, &primary_gpt_h, &entries);
+	write_secondary_gpt(&params, &secondary_gpt_h, &entries);
+	
+	write_segment(&bh, &params, 0, &bh, sizeof(bh));
+	write_segment(&bh, &params, bh.total_blocks - 1, &eop, sizeof(eop));
+	write_segment(&bh, &params, bh.wia_start, &wia_h, sizeof(wia_h)); 
+	write_segment(&bh, &params, bh.sr_start, &sr_h, sizeof(sr_h));
+
+	uint64_t smi_body_blocks = (bh.ir_size - 2) * 2 / 5;
+
+	write_segment(&bh, &params, bh.ir1_start, &smi_h1, sizeof(smi_h1));
+	write_segment(&bh, &params, bh.ir1_start + 1, &smi_entry1, sizeof(smi_entry1));
+	write_segment(&bh, &params, bh.ir1_start + 1 + smi_body_blocks, &dli_h1, sizeof(dli_h1));
+	write_segment(&bh, &params, dli_h1.data_offset, &dli_entry1, sizeof(dli_entry1));
+
+	write_segment(&bh, &params, bh.ir2_start, &smi_h2, sizeof(smi_h2));
+	write_segment(&bh, &params, bh.ir2_start + 1, &smi_entry2, sizeof(smi_entry2));
+	write_segment(&bh, &params, bh.ir2_start + 1 + smi_body_blocks, &dli_h2, sizeof(dli_h2));
+	write_segment(&bh, &params, dli_h2.data_offset, &dli_entry2, sizeof(dli_entry2));
+
+	write_segment(&bh, &params, bh.ir3_start, &smi_h3, sizeof(smi_h3));
+	write_segment(&bh, &params, bh.ir3_start + 1, &smi_entry3, sizeof(smi_entry3));
+	write_segment(&bh, &params, bh.ir3_start + 1 + smi_body_blocks, &dli_h3, sizeof(dli_h3));
+	write_segment(&bh, &params, dli_h3.data_offset, &dli_entry3, sizeof(dli_entry3));
+
+
 	if (params.fd >= 0) {
 		close(params.fd);
 	}

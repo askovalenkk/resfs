@@ -16,6 +16,7 @@
 #include <unistd.h>
 #include <libgen.h>
 #include <limits.h>
+#include <time.h>
 
 #include <sys/stat.h>
 #include <sys/random.h>
