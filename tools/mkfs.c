@@ -52,7 +52,7 @@ struct protective_mbr {
 	uint8_t reserved[446];
 	struct mbr_partition_entry entry;
 	uint8_t unused_entries[3][16];
-	uint16_t boot_signature; /* 0x55AA */
+	uint8_t boot_signature[2]; /* 0x55AA */
 } __packed;
 
 _Static_assert(sizeof(struct protective_mbr) == 512, "Protective MBR size must be 512 bytes");
@@ -685,7 +685,8 @@ int build_protective_mbr(struct protective_mbr *mbr, struct dev_params *params)
 		mbr->entry.size_in_lba = disk_lba_count - 1;
 	}
 
-	mbr->boot_signature = 0x55AA;
+	mbr->boot_signature[0] = 0x55;
+	mbr->boot_signature[1] = 0xAA;
 	return 0; 
 }
 
