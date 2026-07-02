@@ -151,7 +151,7 @@ struct resfs_eop {
 	uint64_t ir_size;
 	uint64_t data1_start;
 	uint64_t data2_start;
-	uint64_t start_of_partition_lba;
+	uint64_t start_of_partition;
 	uint64_t partition_size;
 	uint32_t logical_sector_size;
 	uint8_t blake3_hash[32];
