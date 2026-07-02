@@ -1030,6 +1030,7 @@ int main(int argc, char *argv[])
 	write_segment(&bh, &params, bh.ir3_start + 1 + smi_body_blocks, &dli_h3, sizeof(dli_h3));
 	write_segment(&bh, &params, dli_h3.data_offset, &dli_entry3, sizeof(dli_entry3));
 
+	write_segment(&bh, &params, smi_entry1.seg0_lba, &root_seg, sizeof(root_seg));
 
 	if (params.fd >= 0) {
 		close(params.fd);
