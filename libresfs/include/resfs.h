@@ -62,10 +62,14 @@
 #define EXT_OVERFLOW (UINT32_C(1) << 15)
 
 /* WIA operations */
-#define WIA_OP_CREATE 1
-#define WIA_OP_WRITE 2
-#define WIA_OP_DEFRAG 3 
-#define WIA_OP_EXPAND 4
+#define WIA_OP_CREATE (UINT32_C(1) << 0)
+#define WIA_OP_WRITE (UINT32_C(1) << 1)
+#define WIA_OP_DEFRAG (UINT32_C(1) << 2)
+#define WIA_OP_EXPAND (UINT32_C(1) << 3)
+#define WIA_OP_DELETE (UINT32_C(1) << 4)
+#define WIA_OP_RENAME (UINT32_C(1) << 5)
+#define WIA_RENAME_OF (UINT32_C(1) << 6)
+#define WIA_RENAME_IF (UINT32_C(1) << 7)
 
 /* ACL types */
 #define ACL_USER 0x01
