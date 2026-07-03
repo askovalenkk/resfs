@@ -5,7 +5,6 @@
 
 #include <assert.h>
 #include <stdbool.h>
-#include <string.h>
 #include <stdint.h>
 
 #include "blake3.h"

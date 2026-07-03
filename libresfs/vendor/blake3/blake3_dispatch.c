@@ -7,11 +7,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define BLAKE3_NO_SSE2
-#define BLAKE3_NO_SSE41
-#define BLAKE3_NO_AVX2
-#define BLAKE3_NO_AVX512
-
 #include "blake3_impl.h"
 
 #if defined(_MSC_VER)

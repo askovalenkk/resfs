@@ -1,5 +1,5 @@
 /*
-*  resfs/libresfs/include/tools.h
+*  resfs/tools/include/tools.h
 *  SPDX-License-Identifier: MIT
 *  Copyright (c) 2026 Andrei Kovalenko
 */

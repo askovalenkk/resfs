@@ -962,7 +962,7 @@ int main(int argc, char *argv[])
 	if (args.dev_type) {
 		if (params.is_disk_part) {
 			if (!params.no_parent_dev_access) {
-				printf("mkfs.resfs: error: disk partition formatting is not yet implemented");
+				printf("mkfs.resfs: error: disk partition formatting is not yet implemented\n");
 				goto cleanup;
 			}
 		}

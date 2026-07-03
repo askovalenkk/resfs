@@ -1,5 +1,5 @@
 /*
-*  resfs/libresfs/src/wir.c
+*  resfs/libresfs/src/wia.c
 *  SPDX-License-Identifier: MIT
 *  Copyright (c) 2026 Andrei Kovalenko
 */

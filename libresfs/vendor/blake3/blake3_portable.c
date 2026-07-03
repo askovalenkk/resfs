@@ -4,7 +4,7 @@
 */
 
 #include "blake3_impl.h"
-#include <string.h>
+#include "resfs_platform.h"
 
 INLINE uint32_t rotr32(uint32_t w, uint32_t c) {
   return (w >> c) | (w << (32 - c));
