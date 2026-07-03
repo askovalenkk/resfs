@@ -784,9 +784,10 @@ int build_eop(struct resfs_eop *eop, struct resfs_bh *bh)
 	return 0;
 }
 
-int build_wia_h(struct resfs_wia_h *wia_h)
+int build_wia_h(struct resfs_wia_h *wia_h, struct resfs_bh *bh)
 {
 	memcpy(wia_h->wia_sig, WIA_SIG, 8);
+	wia_h->capacity = (bh->wia_size - 1) * 4096 / 20;
 	wia_h->data_offset = 2;
 	return 0;
 }
@@ -803,14 +804,28 @@ int build_smi_h(struct resfs_smi_h *smi_h, struct resfs_bh *bh)
 	smi_h->used_blocks = 1;	
 	uint64_t smi_body_blocks = (bh->ir_size - 2) * 2 / 5;
 	smi_h->entry_count = smi_body_blocks * 4096 / sizeof(struct resfs_smi_entry);
+	smi_h->file_counter = 1;
+	smi_h->last_mount = now_ns();
 	return 0;
 }
 
-int build_smi_root_entry(struct resfs_smi_entry *smi_entry, struct resfs_bh *bh)
+int build_smi_root_entry(struct resfs_smi_entry *smi_entry, struct resfs_smi_h *smi_h, struct resfs_bh *bh)
 {
 	smi_entry->file_id = 1;
 	uint64_t buffer_blocks = max(RESFS_MIN_BUFFER_BLOCKS, bh->total_blocks * 3 / 1000);
 	smi_entry->seg0_lba = bh->data1_start + buffer_blocks;
+
+	struct smi_body {
+		struct resfs_smi_entry entry1;
+		struct resfs_smi_entry entries[];
+	} __packed;
+	
+	size_t size = sizeof(struct smi_body) + smi_h->entry_count * sizeof(struct resfs_smi_entry);
+	struct smi_body *smi_body = calloc(1, size);
+	smi_body->entry1 = *smi_entry;
+	blake3_hash(smi_body, size, smi_h->blake3_hash);
+	free(smi_body);
+
 	return 0;
 }
 
@@ -974,6 +989,7 @@ int main(int argc, char *argv[])
 		goto cleanup;
 	}
 
+	printf("Building GPT...\n");
 	build_protective_mbr(&mbr, &params);
 	build_gpt_partition_entry(&entry, &part_guid, &part_uuid, &bh);
 	build_primary_gpt_header(&primary_gpt_h, &params, &bh, &disk_guid);
@@ -985,53 +1001,96 @@ int main(int argc, char *argv[])
 	secondary_gpt_h.partition_entry_array_crc32 = crc32(&entries, sizeof(struct gpt_partition_entries));
 	secondary_gpt_h.header_crc32 = crc32(&secondary_gpt_h, sizeof(struct gpt_header));
 
+	printf("Building BH...\n");
 	build_bh(&bh, &args, &part_uuid);
+
+	printf("Building EOP segment...\n");
 	build_eop(&eop, &bh);
-	build_wia_h(&wia_h);
+
+	printf("Building WIA region...\n");
+	build_wia_h(&wia_h, &bh);
+
+	printf("Building SR...\n");
 	build_sr_h(&sr_h);
+
+	printf("Building IR1...\n");
 	build_smi_h(&smi_h1, &bh);
-	build_smi_root_entry(&smi_entry1, &bh);
+	build_smi_root_entry(&smi_entry1, &smi_h1, &bh);
 	build_dli_h(&dli_h1, &bh, bh.ir1_start);
 	build_dli_root_entry(&dli_entry1);
 
+	printf("Building IR2...\n");
 	build_smi_h(&smi_h2, &bh);
-	build_smi_root_entry(&smi_entry2, &bh);
+	build_smi_root_entry(&smi_entry2, &smi_h2, &bh);
 	build_dli_h(&dli_h2, &bh, bh.ir2_start);
 	build_dli_root_entry(&dli_entry2);
 
+	printf("Building IR3...\n");
 	build_smi_h(&smi_h3, &bh);
-	build_smi_root_entry(&smi_entry3, &bh);
+	build_smi_root_entry(&smi_entry3, &smi_h3, &bh);
 	build_dli_h(&dli_h3, &bh, bh.ir3_start);
 	build_dli_root_entry(&dli_entry3);
 
+	printf("Building Root segment...\n\n");
 	build_root_seg(&root_seg);
 
+	printf("Writing Primary GPT...   ");
 	write_primary_gpt(&params, &mbr, &primary_gpt_h, &entries);
+	printf("Done.\n");
+
+	printf("Writing Secondary GPT... ");
 	write_secondary_gpt(&params, &secondary_gpt_h, &entries);
-	
+	printf("Done.\n");
+
+	printf("Writing BH...            ");
 	write_segment(&bh, &params, 0, &bh, sizeof(bh));
+	printf("Done.\n");
+
+	printf("Writing EOP segment...   ");
 	write_segment(&bh, &params, bh.total_blocks - 1, &eop, sizeof(eop));
+	printf("Done.\n");
+
+	printf("Writing WIA region...    ");
 	write_segment(&bh, &params, bh.wia_start, &wia_h, sizeof(wia_h)); 
+	printf("Done.\n");
+
+	printf("Writing SR...            ");
 	write_segment(&bh, &params, bh.sr_start, &sr_h, sizeof(sr_h));
+	printf("Done.\n");
 
 	uint64_t smi_body_blocks = (bh.ir_size - 2) * 2 / 5;
 
+	printf("Writing IR1...           ");
 	write_segment(&bh, &params, bh.ir1_start, &smi_h1, sizeof(smi_h1));
 	write_segment(&bh, &params, bh.ir1_start + 1, &smi_entry1, sizeof(smi_entry1));
 	write_segment(&bh, &params, bh.ir1_start + 1 + smi_body_blocks, &dli_h1, sizeof(dli_h1));
 	write_segment(&bh, &params, dli_h1.data_offset, &dli_entry1, sizeof(dli_entry1));
+	printf("Done.\n");
 
+	printf("Writing IR2...           ");
 	write_segment(&bh, &params, bh.ir2_start, &smi_h2, sizeof(smi_h2));
 	write_segment(&bh, &params, bh.ir2_start + 1, &smi_entry2, sizeof(smi_entry2));
 	write_segment(&bh, &params, bh.ir2_start + 1 + smi_body_blocks, &dli_h2, sizeof(dli_h2));
 	write_segment(&bh, &params, dli_h2.data_offset, &dli_entry2, sizeof(dli_entry2));
+	printf("Done.\n");
 
+	printf("Writing IR3...           ");
 	write_segment(&bh, &params, bh.ir3_start, &smi_h3, sizeof(smi_h3));
 	write_segment(&bh, &params, bh.ir3_start + 1, &smi_entry3, sizeof(smi_entry3));
 	write_segment(&bh, &params, bh.ir3_start + 1 + smi_body_blocks, &dli_h3, sizeof(dli_h3));
 	write_segment(&bh, &params, dli_h3.data_offset, &dli_entry3, sizeof(dli_entry3));
+	printf("Done.\n");
 
+	printf("Writing Root segment...  ");
 	write_segment(&bh, &params, smi_entry1.seg0_lba, &root_seg, sizeof(root_seg));
+	printf("Done.\n\n");
+
+	printf("Filesystem created successfully!\n");
+	printf("Partition UUID: %08x-%04x-%04x-%02x%02x%02x%02x%02x%02x%02x%02x\n", part_uuid.data1, part_uuid.data2, part_uuid.data3, part_uuid.data4[0], part_uuid.data4[1], part_uuid.data4[2], part_uuid.data4[3], part_uuid.data4[4], part_uuid.data4[5], part_uuid.data4[6], part_uuid.data4[7]);
+	if (args.label) {
+		printf("Partition label: %s\n", args.label);
+	}
+	printf("Root LBA: %li\n\n", smi_entry1.seg0_lba);
 
 	if (params.fd >= 0) {
 		close(params.fd);
