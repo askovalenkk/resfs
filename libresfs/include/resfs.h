@@ -179,22 +179,19 @@ struct resfs_snap_extent {
 struct resfs_wia_h {
 	uint8_t wia_sig[8];
 	uint32_t reserved1;
-	uint64_t generation;
 	uint64_t entry_count;
 	uint64_t capacity;
 	uint64_t data_offset;
 	uint8_t blake3_hash[32];
-	uint8_t reserved2[4020];
+	uint8_t reserved2[4028];
 } __packed;
 
 _Static_assert(sizeof(struct resfs_wia_h) == 4096, "resfs_wia_h must be 4096 bytes");
 
 struct resfs_wia_entry {
 	uint64_t file_id;
-	uint8_t operation;
-	uint8_t reserved[3];
-	uint32_t ext_count;
-	struct resfs_extent extents[];
+	uint64_t seg0_lba;
+	uint32_t operation;
 } __packed;
 
 struct resfs_sr_h {
@@ -210,8 +207,7 @@ struct resfs_sr_entry {
 	uint64_t snapshot_id;
 	uint64_t snap_file_id;
 	uint64_t created_at;
-	uint8_t live;
-	uint8_t reserved[3];
+	uint32_t live;
 	uint8_t blake3_hash[32];
 } __packed;
 
