@@ -839,11 +839,23 @@ int build_dli_h(struct resfs_dli_h *dli_h, struct resfs_bh *bh, uint64_t ir_star
 	return 0;
 }
 
-int build_dli_root_entry(struct resfs_dli_entry *dli_entry)
+int build_dli_root_entry(struct resfs_dli_entry *dli_entry, struct resfs_dli_h *dli_h)
 {
 	dli_entry->name_hash = blake3_hash_name("/");
 	dli_entry->file_id = 1;
 	dli_entry->parent_dir_id = 0;
+
+	struct dli_body {
+		struct resfs_dli_entry entry1;
+		struct resfs_dli_entry entries[];
+	} __packed;
+
+	size_t size = sizeof(struct dli_body) + dli_h->entry_count * sizeof(struct resfs_dli_entry);
+	struct dli_body *dli_body = calloc(1, size);
+	dli_body->entry1 = *dli_entry;
+	blake3_hash(dli_body, size, dli_h->blake3_hash);
+	free(dli_body);
+
 	return 0;
 }
 
@@ -1017,19 +1029,19 @@ int main(int argc, char *argv[])
 	build_smi_h(&smi_h1, &bh);
 	build_smi_root_entry(&smi_entry1, &smi_h1, &bh);
 	build_dli_h(&dli_h1, &bh, bh.ir1_start);
-	build_dli_root_entry(&dli_entry1);
+	build_dli_root_entry(&dli_entry1, &dli_h1);
 
 	printf("Building IR2...\n");
 	build_smi_h(&smi_h2, &bh);
 	build_smi_root_entry(&smi_entry2, &smi_h2, &bh);
 	build_dli_h(&dli_h2, &bh, bh.ir2_start);
-	build_dli_root_entry(&dli_entry2);
+	build_dli_root_entry(&dli_entry2, &dli_h2);
 
 	printf("Building IR3...\n");
 	build_smi_h(&smi_h3, &bh);
 	build_smi_root_entry(&smi_entry3, &smi_h3, &bh);
 	build_dli_h(&dli_h3, &bh, bh.ir3_start);
-	build_dli_root_entry(&dli_entry3);
+	build_dli_root_entry(&dli_entry3, &dli_h3);
 
 	printf("Building Root segment...\n\n");
 	build_root_seg(&root_seg);
