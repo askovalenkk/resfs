@@ -62,14 +62,15 @@
 #define EXT_OVERFLOW (UINT32_C(1) << 15)
 
 /* WIA operations */
-#define WIA_OP_CREATE (UINT32_C(1) << 0)
-#define WIA_OP_WRITE (UINT32_C(1) << 1)
-#define WIA_OP_DEFRAG (UINT32_C(1) << 2)
-#define WIA_OP_EXPAND (UINT32_C(1) << 3)
-#define WIA_OP_DELETE (UINT32_C(1) << 4)
-#define WIA_OP_RENAME (UINT32_C(1) << 5)
-#define WIA_RENAME_OF (UINT32_C(1) << 6)
-#define WIA_RENAME_IF (UINT32_C(1) << 7)
+#define WIA_FREE_ENTRY (UINT32_C(1) << 0)
+#define WIA_OP_CREATE (UINT32_C(1) << 1)
+#define WIA_OP_WRITE (UINT32_C(1) << 2)
+#define WIA_OP_DEFRAG (UINT32_C(1) << 3)
+#define WIA_OP_EXPAND (UINT32_C(1) << 4)
+#define WIA_OP_DELETE (UINT32_C(1) << 5)
+#define WIA_OP_RENAME (UINT32_C(1) << 6)
+#define WIA_RENAME_OF (UINT32_C(1) << 7)
+#define WIA_RENAME_IF (UINT32_C(1) << 8)
 
 /* ACL types */
 #define ACL_USER 0x01
@@ -220,11 +221,10 @@ struct resfs_smi_h {
 	uint64_t reserved1;
 	uint64_t generation;
 	uint64_t file_counter;
-	uint64_t used_blocks;
 	uint64_t last_mount;
 	uint64_t entry_count;
 	uint8_t blake3_hash[32];
-	uint8_t reserved2[4008];
+	uint8_t reserved2[4016];
 } __packed;
 
 _Static_assert(sizeof(struct resfs_smi_h) == 4096, "resfs_smi_h must be 4096 bytes");	
@@ -333,5 +333,12 @@ struct resfs_seg {
 } __packed;
 
 _Static_assert(sizeof(struct resfs_seg) == 4096, "resfs_seg must be 4096 bytes");
+
+struct resfs_dir_entry {
+	uint8_t filename_len;
+	uint8_t filename[255];
+	uint64_t file_id;
+	uint32_t flags;
+} __packed;
 
 #endif /* RESFS_H */

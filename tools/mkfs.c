@@ -801,7 +801,6 @@ int build_sr_h(struct resfs_sr_h *sr_h)
 int build_smi_h(struct resfs_smi_h *smi_h, struct resfs_bh *bh)
 {
 	memcpy(smi_h->smi_sig, SMI_SIG, 8);
-	smi_h->used_blocks = 1;	
 	uint64_t smi_body_blocks = (bh->ir_size - 2) * 2 / 5;
 	smi_h->entry_count = smi_body_blocks * 4096 / sizeof(struct resfs_smi_entry);
 	smi_h->file_counter = 1;

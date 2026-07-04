@@ -415,26 +415,6 @@ the one that can fail without loss of information.
    segments are the only truth
 ```
 
-### EOP Conflict Resolution
-
-```
-EOP absent or not written:
-  → system operates normally, EOP is optional
-  → recovery without GPT falls back to brute-force IR scan
-
-EOP BLAKE3 invalid:
-  → EOP ignored entirely
-  → scanner searches for IR by "ResFSSMI" magic brute-force
-
-EOP fs_uuid does not match BH:
-  → EOP ignored (foreign partition or corruption)
-  → BH always wins on uuid conflict
-
-EOP hints conflict with BH:
-  → BH wins (BH is authoritative, EOP hints are advisory)
-  → EOP hints used only when BH is unavailable
-```
-
 ---
 
 ## WIA — Write Intent Array
@@ -697,8 +677,7 @@ Offset  Size    Field               Description
 0       8       snapshot_id         u64, unique monotonic ID
 8       8       snap_file_id        u64, file_id of the snapshot file in Data Region
 16      8       created_at          u64, Unix timestamp nanoseconds
-24      1       live                u8, 1 = live, 0 = deleted
-25      3       reserved            must be 0
+24      4       live                u32, 1 = live, 0 = deleted
 28      32      blake3_hash         BLAKE3 of bytes [0..59]
 ```
 
@@ -1201,7 +1180,7 @@ correct order regardless of physical layout on disk.
 ## File ID
 
 ```c
-typedef uint64_t file_id_t;
+uint64_t file_id;
 ```
 
 File IDs are plain monotonic u64 counters. Simple, small, recoverable.
