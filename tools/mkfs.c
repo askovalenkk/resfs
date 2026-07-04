@@ -787,7 +787,7 @@ int build_eop(struct resfs_eop *eop, struct resfs_bh *bh)
 int build_wia_h(struct resfs_wia_h *wia_h, struct resfs_bh *bh)
 {
 	memcpy(wia_h->wia_sig, WIA_SIG, 8);
-	wia_h->capacity = (bh->wia_size - 1) * 4096 / 20;
+	wia_h->capacity = (bh->wia_size - 1) * 204;
 	wia_h->data_offset = 2;
 	return 0;
 }
