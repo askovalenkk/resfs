@@ -87,7 +87,7 @@ This is part of the standard — permanent and immutable.
 ### Why BLAKE3?
 
 | Property       | CRC32 | SHA-256 | BLAKE3  |
-|----------------|-------|---------|---------| 
+|----------------|-------|---------|---------|
 | Speed          | Fast  | Medium  | Fastest |
 | Output size    | 4B    | 32B     | 32B     |
 | Cryptographic  | No    | Yes     | Yes     |
@@ -117,10 +117,10 @@ No journal needed. No replay. Recovery is always deterministic from segments.
 ### Why WIA instead of a journal?
 
 A journal logs intent and replays operations on recovery. WIA does neither.
-WIA only records where new segments were written and the complete current
-extent list of the file — so that on recovery, the scanner knows exactly
-which blocks to check for IS_COMMITTED, instead of scanning the entire
-Data Region.
+WIA only records which file was being written, its operation type, and
+where its manifest (SEG 0) landed — so that on recovery, the scanner knows
+exactly which SEG 0 blocks to check for IS_COMMITTED, instead of scanning
+the entire Data Region.
 
 WIA is a recovery accelerator, not a journal. No replay. No redo.
 If WIA itself is corrupt or missing, recovery falls back to full
@@ -158,7 +158,7 @@ filesystem.
 
 ResFS separates concerns cleanly:
 - **BH** carries only immutable identity + layout (written once at mkfs)
-- **SMI header** carries allocation state (file_counter, used_blocks)
+- **SMI header** carries allocation state (file_counter)
 - **Segments** carry everything else
 
 If BH is destroyed, EOP provides partition boundaries and IR hints.
@@ -215,6 +215,10 @@ and no mount history.
 All BH fields except `ir_size` and `ir3_start` are written once at mkfs
 and remain stable for the lifetime of the partition. `ir_size` and
 `ir3_start` are updated only on IR expansion.
+
+BH exists as a single on-disk copy. It is not replicated. Its counterpart
+EOP carries nearly identical layout fields and acts as its recovery backup
+(see BH & EOP Mutual Backup).
 
 ```
 Offset  Size    Field                    Description
@@ -318,8 +322,9 @@ EOP is a physical boundary marker. It occupies the last block of the
 partition (`last_lba`). It is not part of any IR. It is not a cache.
 It is not a source of truth about files.
 
-EOP is used only during recovery when GPT is destroyed and partition
-boundaries are unknown. It is not required for normal operation.
+EOP is used during recovery when GPT is destroyed and partition
+boundaries are unknown, and as a recovery backup for BH (see
+BH & EOP Mutual Backup). It is not required for normal operation.
 
 ```
 Offset  Size    Field                   Description
@@ -360,6 +365,26 @@ On hex dump the last block ends visually as:
 ```
 
 **EOP is 4096 bytes (one block), fixed.**
+
+### BH & EOP Mutual Backup
+
+BH and EOP are both single, non-replicated structures, but they carry
+nearly identical layout fields (`wia_start`, `sr_start`, `ir1/ir2/ir3_start`, 
+etc.) — the only field that changes during the filesystem's lifetime, 
+`ir_size` / `ir3_start`, is present and kept current in both.
+
+Each is protected by its own independent BLAKE3. If one is corrupted,
+the other supplies the same information:
+
+```
+BH BLAKE3 invalid  → load layout fields from EOP instead
+EOP BLAKE3 invalid → load layout fields from BH instead
+Both invalid        → brute-force scan for "ResFSSMI" magic (see BH Lost or Corrupted)
+```
+
+This is why IR Expansion writes EOP before BH (see IR Expansion,
+Expansion algorithm, step 2) — whichever of the two is written second is
+the one that can fail without loss of information.
 
 ### EOP Usage During Recovery
 
@@ -419,22 +444,23 @@ at mkfs. It lives at block 1 — immediately after BH — and is always
 findable without any pointer.
 
 WIA is a crash recovery accelerator. Before any CoW operation, a WIA entry
-is written recording the file_id, operation type, and the complete current
-extent list of the file (including new extents). On recovery, the scanner
-reads WIA and checks only those specific blocks for IS_COMMITTED.
+is written recording which file's SEG 0 is about to change and
+why. On recovery, the scanner reads WIA and checks only those specific
+SEG 0 blocks for IS_COMMITTED — it never needs to re-derive the extent
+list, because SEG 0 is self-describing (see Why extents in SEG 0, not in WIA).
 
 **WIA is not a journal.** No operations are replayed. No redo log.
 If IS_COMMITTED is not set on SEG 0, the write is simply discarded —
-the old version survives in SMI. WIA only tells the scanner where to look
-and what the intended new state was.
+the old version survives in SMI. WIA only tells the scanner where to look.
 
 If WIA itself is corrupt or absent on recovery, the fallback is a full
 Data Region scan. The result is always identical — WIA only affects speed.
 
-**WIA overflow:** if entry_count reaches capacity, all new write operations
-block until IR is updated and WIA is cleared. This is extremely rare —
-capacity scales with disk size and each entry covers a complete file
-(≤ 8 extents × 20B per file due to defragmenter threshold).
+**WIA overflow:** if the WIA region is full (no free slots for a new
+entry), all new write operations block until an in-flight operation
+completes and its slot is freed. This is expected to be extremely rare —
+capacity scales with disk size, and every entry is fixed at 20 bytes
+regardless of how large or fragmented the file it describes is.
 
 ### WIA Header (4096 bytes, fixed)
 
@@ -443,76 +469,203 @@ Offset  Size    Field           Description
 ------  ----    -----           -----------
 0       8       WIA_SIG         Magic: "ResFSWIA"
 8       4       reserved        u32, must be 0
-12      8       generation      u64, incremented on each WIA write
-20      8       entry_count     u64, number of active entries
-28      8       capacity        u64, maximum entries (computed from wia_size)
-36      8       data_offset     u64, byte offset to entry array (relative to WIA start)
-44      32      blake3_hash     BLAKE3 of entire WIA body (header + entries)
-76      4020    reserved        pad to 4096 bytes
+12      8       entry_count     u64, number of active (non-free) entries
+20      8       capacity        u64, maximum entries (computed from wia_size)
+28      8       data_offset     u64, byte offset to entry array (relative to WIA start; always block 2)
+36      32      blake3_hash     BLAKE3 of entire WIA body (header + entries)
+68      4028    reserved        pad to 4096 bytes
 ```
 
-### WIA Entry (variable length)
+WIA has a single, non-replicated on-disk copy — unlike IR, it carries no
+`generation` field. There is nothing to arbitrate between: WIA has exactly
+one instance, and its own BLAKE3 is the only integrity signal it needs.
+
+### WIA Entry (20 bytes, fixed)
 
 ```
-Offset  Size            Field       Description
-------  ----            -----       -----------
-0       8               file_id     u64
-8       1               operation   u8, see WIA Operations
-9       3               reserved    must be 0
-12      4               ext_count   u32, number of extents
-16      ext_count × n   extents     complete current extent list of the file
+Offset  Size    Field       Description
+------  ----    -----       -----------
+0       8       file_id     u64, the directory or file whose SEG 0 is being (re)written
+8       8       seg0_lba    u64, LBA of the (new) SEG 0 for file_id
+16      4       operation   u32, see WIA Operations
 ```
+
+Entries are read directly from SEG 0 for their extent list — a WIA entry
+never carries extents itself. This keeps every entry exactly 20 bytes
+regardless of file size, fragmentation, or EXT_OVERFLOW chaining.
 
 ### WIA Operations
 
+WIA `operation` is a bitfield, not a plain enum, so that RENAME can compose
+two roles (source / destination) on top of the base operation code.
+
 ```
-CREATE  = 1    new file creation
-WRITE   = 2    CoW rewrite (partial or full)
-DEFRAG  = 3    defragmenter CoW relocation
-EXPAND  = 4    IR expansion CoW relocation
+Bit     Meaning
+---     -------
+0       WIA_FREE_ENTRY      free entry flag
+1       WIA_OP_CREATE       new file creation
+2       WIA_OP_WRITE        CoW rewrite (partial or full, includes TRUNCATE)
+3       WIA_OP_DEFRAG       defragmenter CoW relocation
+4       WIA_OP_EXPAND       IR expansion CoW relocation
+5       WIA_OP_DELETE       soft delete (IS_DELETED gate)
+6       WIA_OP_RENAME       base flag for a rename operation
+7       WIA_RENAME_OF       rename destination (new parent gaining the entry)
+8       WIA_RENAME_IF       rename source (old parent losing the entry)
+9-31    Reserved, must be 0
+
+A slot with `WIA_FREE_ENTRY == 0` is free and available to the allocator.
 ```
+
+### WIA Entry Allocation
+
+Entries live in fixed slots within the WIA Region, in **no particular
+order on disk**. The allocator does not sort or shift entries; it simply
+places a new entry into any free slot (`operation == 0`) and clears it
+back to `operation == 0` on completion.
+
+**Per-block padding.** A 4096-byte block holds `floor(4096 // 20) = 204`
+entries (4080 bytes), leaving 16 bytes of unused space at the end of
+every block. Entries never straddle a block boundary — the 205th entry
+of a block's worth of data always starts at the beginning of the next
+block, not partway through the previous one. This is what makes a
+single WIA block write atomic for every entry inside it, not just for
+adjacent RENAME pairs (see RENAME pair allocation below): the 4KB block
+is the unit of atomic I/O, and no entry is ever split across two such
+units.
+
+The 16 trailing bytes of each block are reserved and always zero. They
+are never interpreted as an entry — `operation == 0` at that offset does
+not need to be checked as a "free slot" because the allocator's slot
+numbering skips over these bytes entirely; they simply do not correspond
+to any slot index.
+
+```
+[WIA data block]  (4096 bytes)
+    [Entry 0]  20B
+    [Entry 1]  20B
+    ...
+    [Entry 203] 20B
+    [reserved]  16B, must be zero, not an addressable slot
+```
+
+**In-memory index.** WIA is not searched linearly at runtime. At mount,
+libresfs performs one full pass over all `capacity` slots and builds:
+
+- A **sharded hash map** `file_id → slot_index` (`slot_index` here means
+  a logical slot number in `[0, capacity)`, mapped to its physical byte
+  offset by `block = slot_index / 204`, `offset_in_block = (slot_index mod 204) * 20`
+  — the 16-byte per-block reserved region is never assigned a slot_index),
+  split into N shards (`shard_id = hash(file_id) mod N`), each shard
+  guarded by its own lock. Lookup, insert, and remove for a given
+  `file_id` only ever take that file_id's shard lock — operations on
+  unrelated file_ids never block each other.
+- A **free-list** of unoccupied slot indices, guarded by a single separate
+  lock. Free-list operations are a single push/pop of a slot index, so
+  contention on this lock is minimal even though it is not sharded.
+
+This in-memory index is purely a runtime structure — it is rebuilt from
+scratch at every mount and has no on-disk representation of its own.
+
+**RENAME pair allocation.** A rename operation needs two entries — one
+`WIA_RENAME_OF` and one `WIA_RENAME_IF` — placed in **two physically
+adjacent slots** (slot N and slot N+1), because their pairing on recovery
+is determined purely by adjacency, not by any linking field (see RENAME
+write path). If two adjacent free slots are not currently available, the
+rename operation waits until the allocator can free up an adjacent pair.
+Both slots for a rename pair must additionally fall within the same
+4096-byte WIA block, so that the pair is written by a single atomic block
+write — a crash can never leave one half of the pair written without
+the other. Because slot indices never span the per-block reserved bytes
+(see Per-block padding above), any adjacent pair (N, N+1) with
+`N mod 204 != 203` is guaranteed to already satisfy this same-block
+requirement; the allocator only needs to skip pairing slot 203 of one
+block with slot 0 of the next.
 
 ### WIA Write Path
 
-WIA entry is written before any CoW operation begins:
+A WIA entry (or entry pair, for RENAME) is written before any CoW
+operation begins after new segments allocated:
 
 ```
-1. Write WIA entry (file_id, operation, complete extents)
-2. Verify BLAKE3 of WIA
-3. Proceed with CoW operation
+1. Allocate new file segments in memory
+2. Allocate a free slot (or adjacent pair, for RENAME)
+3. Write WIA entry/entries (file_id, seg0_lba, operation)
+4. Verify BLAKE3 of WIA
+5. Proceed with the CoW operation
 ```
 
-Crash during step 1: WIA BLAKE3 invalid → WIA entry ignored on recovery.
-No segments have been written yet → filesystem is consistent.
-
-Crash after step 1: WIA entry is valid → recovery reads it → checks
-only the listed blocks for IS_COMMITTED.
+Crash after step 2: WIA entry is valid → recovery reads it → checks
+the referenced SEG 0 for IS_COMMITTED.
 
 ### WIA on Recovery
 
 ```
 1. Read WIA Header — verify BLAKE3
    if invalid → fallback to full Data Region scan
-2. For each WIA entry:
-   a. Read SEG 0 LBA from WIA extents (ext_index = 0)
-   b. Check SEG 0 for IS_COMMITTED
-   c. IS_COMMITTED=1 → write was committed, IR not yet updated
-      → add all extents from WIA entry to SMI
-   d. IS_COMMITTED=0 → write was aborted
-      → mark new blocks free in bitmap (blocks listed in WIA but not in SMI)
-      → if operation=DEFRAG → file remains in defrag queue
-3. Update all three IR copies with recovered SMI state
-4. Clear WIA (zero entry_count, recompute BLAKE3)
+2. For each occupied WIA entry ((operation << 0) != 0):
+   a. If operation has WIA_OP_RENAME → skip entirely here, handle
+      exclusively via RENAME Recovery (steps b-d below do not apply —
+      a RENAME entry's file_id identifies a directory, not the file
+      being moved, and its recovery semantics are pairwise, not a plain
+      SMI add/remove)
+   b. Read SEG 0 at seg0_lba
+   c. Check SEG 0 for IS_COMMITTED
+   d. IS_COMMITTED=1 → write was committed, IR not yet updated
+      → read extents directly from this SEG 0
+      → add/update {file_id, seg0_lba} in SMI
+      → if operation has WIA_OP_DELETE → SEG 0 also has IS_DELETED set
+        → remove {file_id} from SMI and DLI instead of adding
+   e. IS_COMMITTED=0 → write was aborted
+      → mark new blocks free in bitmap (blocks listed in this SEG 0's
+        extents, not yet referenced by any committed SMI entry)
+      → if operation has WIA_OP_DEFRAG → file remains in defrag queue
+3. Process all WIA_OP_RENAME entries — see RENAME Recovery
+4. Update all three IR copies with recovered SMI/DLI state
+5. Clear WIA (zero entry_count, clear every recovered slot to
+   operation == 0, recompute BLAKE3)
 ```
+
+### RENAME Recovery
+
+```
+1. Scan WIA for entries carrying WIA_OP_RENAME.
+2. For each WIA_RENAME_OF entry found at slot N:
+   a. slot N+1 must carry WIA_RENAME_IF for the same rename — this is
+      guaranteed by allocation (see WIA Entry Allocation), not by any
+      stored link.
+   b. Check IS_COMMITTED on the OF entry's SEG 0 (destination directory):
+      - If IS_COMMITTED=1 → destination directory already has the new
+        entry. Proceed to check the IF entry.
+      - If IS_COMMITTED=0 → destination write never landed. Discard
+        both entries; the rename never took effect. Filesystem is
+        consistent as if RENAME was never called.
+   c. If OF is committed, check IS_COMMITTED on the IF entry's SEG 0
+      (source directory):
+      - If IS_COMMITTED=1 → both halves committed. Normal completion:
+        update SMI/DLI for both directories.
+      - If IS_COMMITTED=0 → destination already has the entry, but the
+        source directory has not yet been rewritten to remove it. The
+        file is temporarily visible under both names. Recovery completes
+        the pending half: apply the source directory's removal exactly
+        as the original operation intended.
+3. Clear both slots to operation == 0.
+```
+
+This makes the intermediate state (visible in both directories) a safe
+superset, not a hole — RENAME never has a window in which the file is
+invisible from both paths (see RENAME write path for why the OF write
+always precedes the IF write).
 
 ### WIA Capacity
 
 ```
-capacity = (wia_size * 4096 - 4096) / avg_entry_size
+entries_per_block = floor(4096 / 20) = 204
+data_blocks       = wia_size - 1        (block 0 is the WIA Header)
+capacity          = data_blocks * entries_per_block
 ```
 
-On a 1TB disk (wia_size ≈ 256 blocks): capacity >> 1000 entries.
-On a 64MB embedded disk (wia_size = 8 blocks, 32KB): capacity ≈ 100 entries.
+On a 1TB disk (wia_size ≈ 256 blocks, 1GB): capacity ≈ 256 * 204 ≈ 52,000 entries.
+On a 64MB embedded disk (wia_size = 16 blocks, 64KB): capacity ≈ 15 * 204 ≈ 3,060 entries.
 
 WIA capacity scales automatically with disk size. No configuration needed.
 
@@ -591,8 +744,8 @@ The SMI is the physical acceleration layer: `file_id → SEG 0 location`.
 It is a cache. Destroying it loses nothing — rebuilding from segments
 is always possible.
 
-The SMI header also carries `file_counter` and `used_blocks` —
-allocation state that belongs to the physical layer.
+The SMI header carries `file_counter` — allocation state that belongs
+to the physical layer.
 
 ### SMI Header (4096 bytes, fixed)
 
@@ -603,11 +756,10 @@ Offset  Size    Field               Description
 8       8       reserved            u64, must be 0
 16      8       generation          u64, incremented on each IR write
 24      8       file_counter        u64, next file_id to assign
-32      8       used_blocks         u64, occupied blocks in Data Region
-40      8       last_mount          u64, Unix timestamp nanoseconds
-48      8       entry_count         u64
-56      32      blake3_hash         BLAKE3 of entire SMI body
-88      4008    reserved            pad to 4096 bytes
+32      8       last_mount          u64, Unix timestamp nanoseconds
+40      8       entry_count         u64
+48      32      blake3_hash         BLAKE3 of entire SMI body
+80      4016    reserved            pad to 4096 bytes
 ```
 
 ### SMI Entry (16 bytes, fixed)
@@ -666,7 +818,7 @@ Read SEG 0 at seg0_lba → extents, file_size, flags
 7. max_file_id = max(file_id) across all valid SEG 0
 8. file_counter = max_file_id + 1
 9. generation = 1 (or old_max + 1 if any valid partial IR found)
-10. Build used_blocks bitmap from SMI + SR extents
+10. Build free space bitmap from SMI + SR extents (see Bitmap Construction)
 11. Write new SMI + DLI into all three IR regions
 12. Mount
 ```
@@ -707,6 +859,31 @@ Offset  Size    Field               Description
 16      8       parent_dir_id       u64
 ```
 
+### DLI On-Disk Packing
+
+A 4096-byte block holds `floor(4096 / 24) = 170` entries (4080 bytes),
+leaving 16 reserved bytes at the end of every block — the same situation
+as WIA entries (see WIA Entry Allocation, Per-block padding), and for the
+same reason: entries must not straddle a block boundary, so that a single
+block write is always atomic for every entry inside it.
+
+This means the binary search in Lookup Algorithm below cannot address an
+entry by a flat `mid * 24` byte offset — it must convert the logical
+entry index to a physical byte offset that accounts for the per-block
+gap:
+
+```
+block      = mid / 170
+offset     = (mid % 170) * 24
+byte_offset = block * 4096 + offset
+```
+
+Because DLI is always rebuilt as a whole (see DLI Rebuild) rather than
+updated entry-by-entry in place, this padding costs nothing beyond the
+same ~0.4% overhead as WIA — the rebuild simply stops packing entries
+16 bytes before the end of each block instead of packing them
+edge-to-edge across the whole array.
+
 ### Entry Ordering Rule
 
 DLI entries are always sorted by:
@@ -731,13 +908,15 @@ high = entry_count - 1
 
 while low <= high:
     mid = (low + high) / 2
+    entry = read_dli_entry(mid)   // see DLI On-Disk Packing for the
+                                   // logical-index → byte_offset conversion
 
-    if DLI[mid] < key:
+    if entry < key:
         low = mid + 1
-    else if DLI[mid] > key:
+    else if entry > key:
         high = mid - 1
     else:
-        candidate_file_id = DLI[mid].file_id
+        candidate_file_id = entry.file_id
         → verify full name in directory segment  ← mandatory
         if name matches: return candidate_file_id
         if name does not match (hash collision):
@@ -815,10 +994,10 @@ IR3: ir3_start moves left (decreases), expands leftward
 
 2. Write new EOP with updated ir_size and new ir3_start
    (EOP updated before BH so that if BH write fails,
-    EOP reflects the intended new state)
+    EOP reflects the intended new state — see BH & EOP Mutual Backup)
 
 3. For each file in expansion buffer zone:
-   a. COW_EXPAND: relocate file to free Data Region space
+   a. COW_WRITE (WIA_OP_EXPAND): relocate file to free Data Region space
    b. Update SMI: seg0_lba → new location
 
 4. For each IR (one at a time, others remain active):
@@ -834,6 +1013,11 @@ Power loss before step 2: BH unchanged, EOP unchanged → clean state.
 Power loss between step 2 and 5: EOP has new layout, BH has old layout.
 On mount: BH valid → use BH. If BH invalid → use EOP hints → IRs intact.
 Power loss after step 5: new BH valid → new IRs valid.
+
+Each individual relocation in step 3 is already crash-safe on its own
+(it is an ordinary WIA-guarded COW_WRITE) — a crash partway through step 3
+simply leaves some files relocated and others not, which the next
+IR Expansion attempt naturally continues.
 
 **Capacity on 1TB disk:**
 
@@ -1206,9 +1390,9 @@ Power loss at any step leaves the filesystem in a consistent state.
 
 ```
 1. file_id = atomic_increment(smi.file_counter)
-2. Check WIA: if entry with this file_id exists → wait/error
+2. Check WIA in-memory index: if entry with this file_id exists → wait/error
 3. Allocate blocks in bitmap (in memory)
-4. Write WIA entry (file_id, CREATE, all extents)
+4. Allocate a free WIA slot; write WIA entry (file_id, seg0_lba, WIA_OP_CREATE)
 5. Write all segments with created_at = now()
 6. Compute BLAKE3, verify
 7. Set IS_COMMITTED on SEG 0
@@ -1216,15 +1400,15 @@ Power loss at any step leaves the filesystem in a consistent state.
 9. Update DLI: add {name_hash, file_id, parent_dir_id}
 10. Write IR1 → IR2 → IR3
 11. Clear IS_COMMITTED on SEG 0
-12. Remove WIA entry
+12. Free the WIA slot (WIA_FREE_ENTRY → 0)
 ```
 
 ### COW_WRITE
 
 ```
-1. Check WIA: if entry with this file_id exists → wait/error
+1. Check WIA in-memory index: if entry with this file_id exists → wait/error
 2. Allocate new blocks in bitmap
-3. Write WIA entry (file_id, WRITE, all new extents)
+3. Allocate a free WIA slot; write WIA entry (file_id, new seg0_lba, WIA_OP_WRITE)
 4. Write new segments with created_at = now()
 5. Write new SEG 0 with generation+1, new extents
 6. Compute BLAKE3, verify
@@ -1241,15 +1425,15 @@ Power loss at any step leaves the filesystem in a consistent state.
          Clear block in bitmap
 10. Write IR1 → IR2 → IR3
 11. Clear IS_COMMITTED
-12. Remove WIA entry
+12. Free the WIA slot (WIA_FREE_ENTRY → 0)
 ```
 
 ### COW_DEFRAG
 
 ```
-1. Check WIA: if entry with this file_id exists → wait/error
+1. Check WIA in-memory index: if entry with this file_id exists → wait/error
 2. Allocate new contiguous blocks in bitmap
-3. Write WIA entry (file_id, DEFRAG, all new extents)
+3. Allocate a free WIA slot; write WIA entry (file_id, new seg0_lba, WIA_OP_DEFRAG)
 4. Copy data to new blocks, preserve created_at of each segment
 5. Compute BLAKE3, verify
 6. Write new SEG 0 with generation+1, new extents
@@ -1266,28 +1450,26 @@ Power loss at any step leaves the filesystem in a consistent state.
          Clear block in bitmap
 10. Write IR1 → IR2 → IR3
 11. Clear IS_COMMITTED
-12. Remove WIA entry
+12. Free the WIA slot (WIA_FREE_ENTRY → 0)
 ```
 
-### COW_EXPAND
+### IR Expansion relocation
 
-```
-1. Find all files whose segments reside in expansion buffer zone
-2. For each such file: execute COW_DEFRAG to free Data Region space
-3. Expansion buffer is now free → expand IR into it
-4. Write IR1 → IR2 → IR3 with new ir_size
-5. Update BH and EOP with new ir_size and ir3_start
-```
+IR Expansion relocates files out of the expansion buffer zone using COW_WRITE (see IR Expansion) 
+tagged with `WIA_OP_EXPAND` instead
+of `WIA_OP_WRITE`, purely so that recovery can distinguish "this write was
+part of an expansion" from an ordinary user write when inspecting WIA.
+The write path itself is otherwise identical to COW_WRITE above.
 
 ### TRUNCATE
 
 ```
-1. Check WIA: if entry with this file_id exists → wait/error
+1. Check WIA in-memory index: if entry with this file_id exists → wait/error
 2. Find SEG 0 via SMI (seg0_lba)
 3. Read extents from SEG 0
 4. Determine segments beyond new_size
 5. Allocate new block for new SEG 0 in bitmap
-6. Write WIA entry (file_id, WRITE, new extents)
+6. Allocate a free WIA slot; write WIA entry (file_id, new seg0_lba, WIA_OP_WRITE)
 7. Write new SEG 0 with generation+1, trimmed extents, updated file_size
 8. Compute BLAKE3, verify
 9. Set IS_COMMITTED on new SEG 0
@@ -1304,15 +1486,25 @@ Power loss at any step leaves the filesystem in a consistent state.
       Clear old SEG 0 block in bitmap
 12. Write IR1 → IR2 → IR3
 13. Clear IS_COMMITTED
-14. Remove WIA entry
+14. Free the WIA slot (operation → 0)
 ```
+
+TRUNCATE reuses `WIA_OP_WRITE` rather than a dedicated code — from WIA's
+perspective it is just another CoW rewrite of SEG 0; the distinction is
+not needed on recovery.
 
 ### DELETE
 
+DELETE is a CoW mutation of SEG 0 (setting IS_DELETED) followed by
+metadata removal, so it is WIA-guarded exactly like the other operations —
+a crash between setting IS_DELETED and updating SMI/DLI must not leave the
+filesystem believing a deleted file is still live.
+
 ```
-1. Check WIA: if entry with this file_id exists → wait/error
+1. Check WIA in-memory index: if entry with this file_id exists → wait/error
 2. Find SEG 0 via SMI (seg0_lba)
-3. If sr.live_count == 0:
+3. Allocate a free WIA slot; write WIA entry (file_id, seg0_lba, WIA_OP_DELETE)
+4. If sr.live_count == 0:
      Clear all file blocks in bitmap
    If sr.live_count > 0:
      For each segment of this file:
@@ -1322,21 +1514,75 @@ Power loss at any step leaves the filesystem in a consistent state.
        Else:
          Clear block in bitmap
      Set IS_DELETED on SEG 0
-4. Remove from DLI
-5. Remove from SMI
-6. Write IR1 → IR2 → IR3
+5. Remove from DLI
+6. Remove from SMI
+7. Write IR1 → IR2 → IR3
+8. Free the WIA slot (operation → 0)
 ```
+
+Recovery: if a WIA_OP_DELETE entry is found and its SEG 0 has IS_DELETED
+set, but SMI/DLI still reference the file, recovery removes those SMI/DLI
+entries — completing the delete exactly as WIA on Recovery step 2c
+describes. If IS_DELETED is not set, the delete never took effect and
+SMI/DLI are left untouched.
 
 ### RENAME
 
+RENAME moves a directory entry from one parent directory to another (or
+renames it within the same parent). Each parent directory is itself a
+file with its own SEG 0 — moving an entry between two different parents
+is therefore two independent CoW rewrites (of the source and destination
+directory files), not one. To avoid a window where the entry exists in
+neither directory, the destination is always written and committed
+**before** the source is rewritten to remove it.
+
 ```
+Same-parent rename (old parent == new parent):
+
 1. Find file_id via DLI
-2. COW_WRITE old parent directory segment: remove old entry
-3. COW_WRITE new parent directory segment: add new entry with new name
-   (if old and new parent are the same directory: steps 2 and 3 merge into one COW_WRITE)
-4. Update DLI entry in-place: new name_hash, new parent_dir_id
-5. Write IR1 → IR2 → IR3
+2. COW_WRITE the parent directory segment: remove old entry, add new
+   entry with the new name, in a single new SEG 0
+3. Update DLI entry in-place: new name_hash
+4. Write IR1 → IR2 → IR3
 ```
+
+This case is a single ordinary COW_WRITE (see COW_WRITE above) — no WIA
+pairing is needed because only one directory's SEG 0 changes.
+
+```
+Cross-parent rename (old parent != new parent):
+
+1. Find file_id via DLI
+2. Allocate new blocks in bitmap for the new parent directory's new SEG 0
+   and for the old parent directory's new SEG 0 (both are ordinary CoW
+   rewrites of a directory file, same as any COW_WRITE)
+3. Allocate an adjacent WIA slot pair (see WIA Entry Allocation), now that
+   both new SEG 0 LBAs are known from step 2:
+   slot N   = {new_parent.file_id, new_parent's new seg0_lba, WIA_OP_RENAME | WIA_RENAME_OF}
+   slot N+1 = {old_parent.file_id, old_parent's new seg0_lba, WIA_OP_RENAME | WIA_RENAME_IF}
+4. Write new parent directory segment at its allocated SEG 0 LBA: add new
+   entry with the new name
+5. Set IS_COMMITTED on new parent's new SEG 0
+6. Update SMI for new parent: seg0_lba → new address
+7. Update DLI: add {name_hash, file_id, new_parent_dir_id}
+8. Write IR1 → IR2 → IR3
+9. Clear IS_COMMITTED on new parent's SEG 0
+10. Write old parent directory segment at its allocated SEG 0 LBA: remove
+    old entry
+11. Set IS_COMMITTED on old parent's new SEG 0
+12. Update SMI for old parent: seg0_lba → new address
+13. Remove DLI entry: {name_hash, file_id, old_parent_dir_id}
+14. Write IR1 → IR2 → IR3
+15. Clear IS_COMMITTED on old parent's SEG 0
+16. Free both WIA slots (operation → 0)
+```
+
+Between step 5 and step 11, the file is visible under its new name in the
+new parent AND still visible under its old name in the old parent. This
+is an intentional, safe intermediate state — not a hole. See RENAME
+Recovery for how a crash in this window is resolved deterministically
+from the WIA pair alone (no linking field needed — pairing is by slot
+adjacency, see WIA Entry Allocation).
 
 ### SNAPSHOT_CREATE
 
@@ -1367,12 +1613,19 @@ Power loss at any step leaves the filesystem in a consistent state.
 9. Write IR1 → IR2 → IR3
 ```
 
+If `prev_snap` does not exist (the snapshot being deleted is the oldest
+live one), every block in its snap file simply clears in the bitmap —
+there is no older snapshot for those blocks to be transferred to.
+
 ---
 
 ## Free Space
 
 In-memory bitmap of occupied blocks, rebuilt at every mount.
-Not stored on disk — always reconstructable.
+Not stored on disk — always reconstructable. There is no on-disk
+block-usage counter anywhere in the filesystem (see SMI Header) — the
+bitmap is the single source of truth for free space, both for allocation
+and for any usage reporting.
 
 ### Bitmap Construction at Mount
 
@@ -1386,7 +1639,6 @@ Not stored on disk — always reconstructable.
    a. Read snap file via SMI (snap_file_id → SEG 0 → extents)
    b. Mark all extents in snap file as occupied
 4. All unmarked blocks → free
-5. used_blocks = count of marked blocks
 ```
 
 ### Block Allocator Strategy
@@ -1414,14 +1666,9 @@ pack small files together.
    if WIA entry_count == 0 → skip to step 12 (clean mount)
    if WIA invalid → fallback to full Data Region scan (step 13)
 
-8. For each WIA entry:
-   a. Read SEG 0 LBA from WIA extents
-   b. Check SEG 0 for IS_COMMITTED
-   c. IS_COMMITTED=1 → add extents to SMI, update seg0_lba
-      → if file_id > smi.file_counter: smi.file_counter = file_id + 1
-   d. IS_COMMITTED=0 → mark new blocks free in bitmap
+8. Process WIA entries — see WIA on Recovery and RENAME Recovery
 
-9. Update all three IR copies with recovered SMI state
+9. Update all three IR copies with recovered SMI/DLI state
 10. Clear WIA (zero entry_count, recompute BLAKE3)
 11. Load SR — compute sr.live_count = count(SR entries where live == 1)
 12. Build free space bitmap (SMI + SR, see Bitmap Construction)
@@ -1446,6 +1693,8 @@ Fallback (WIA invalid):
 4. Proceed as normal mount from step 4
 5. Optionally reconstruct and rewrite BH at LBA 0
 ```
+
+See BH & EOP Mutual Backup for why this fallback is always available.
 
 ### Two-Layer Recovery
 
@@ -1547,7 +1796,7 @@ struct resfs_recovery_info {
 | `mkfs.resfs`      | Format partition: write BH, WIA, SR, IR1/2/3, EOP    |
 | `resfs-mount`     | Mount via platform VFS adapter (RhCOS, custom kernel) |
 | `resfs-recover`   | Full disk scan → reconstruct all files                |
-| `resfs-verify`    | Verify BLAKE3 integrity of all segments; --rebuild-bitmap |
+| `resfs-verify`    | Verify BLAKE3 integrity of all segments                |
 | `resfs-visualize` | ASCII visualization of segment and free space layout  |
 | `resfs-snap`      | Create, list, restore, delete snapshots               |
 | `resfs-export`    | Extract raw file or recovery container from ResFS     |
@@ -1620,6 +1869,29 @@ block at the given LBA. Return 0 on success, negative error code on failure.
 `ctx` is an opaque pointer passed back to every call — use it to carry
 platform-specific state (file descriptor, device handle, etc.).
 
+### WIA In-Memory Concurrency Model
+
+The on-disk WIA format is deliberately simple (fixed 20-byte slots, no
+ordering requirement — see WIA Entry Allocation). All concurrency control
+lives in libresfs's in-memory runtime layer, not in the on-disk format,
+so it can evolve independently of the disk layout:
+
+```c
+struct resfs_wia_runtime {
+    /* N shards, each an independent file_id -> slot_index map with its
+       own lock. shard_id = hash(file_id) mod N. Operations on file_ids
+       hashing to different shards never block each other. */
+    struct resfs_wia_shard shards[RESFS_WIA_SHARD_COUNT];
+
+    /* Single free-list of unoccupied slot indices, one separate lock.
+       Not sharded: push/pop is O(1) and held only briefly. */
+    struct resfs_wia_freelist freelist;
+};
+```
+
+Rebuilt from scratch by a single full pass over the WIA Region at every
+mount; never persisted.
+
 ### Known implementations
 
 | Platform          | Location              |
@@ -1648,9 +1920,10 @@ disks directly via POSIX `pread`/`pwrite`.
 
 **Criterion: create 10k files, kill -9, recover everything via full scan**
 
-- [ ] `disk.img` creation: BH + WIA + SR + IR1/2/3 + EOP + Data Region
+- [x] `disk.img` creation: BH + WIA + SR + IR1/2/3 + EOP + Data Region
 - [ ] Bootstrap Header: read / write / verify BLAKE3
 - [ ] WIA Region: read / write / verify BLAKE3 / clear
+- [ ] WIA in-memory index: sharded map + free-list, built at mount
 - [ ] EOP: write / verify / use in recovery
 - [ ] Segment: read / write / verify BLAKE3 (header + footer)
 - [ ] SEG 0: IS_INLINE mode and extent mode
@@ -1662,6 +1935,7 @@ disks directly via POSIX `pread`/`pwrite`.
 - [ ] IR Expansion: sequential, one IR at a time, others remain active
 - [ ] Free space bitmap: build from SMI + SR extents on mount
 - [ ] Bitmap inline update: COW_WRITE, DELETE, TRUNCATE
+- [ ] RENAME: adjacent WIA slot pair allocation + recovery
 - [ ] Mount: WIA-guided recovery + fallback full scan
 - [ ] Recovery: full disk scan → rebuild SMI+DLI → mount
 - [ ] `resfs-recover` proof of concept on disk.img
@@ -1761,10 +2035,28 @@ GC + Snapshot interaction formalized. IR Expansion moved to Phase 1.
 ### v2.0
 - WIR → WIA (Write Intent Array) throughout
 - FS_DIRTY flag removed: mount always checks WIA entry_count
-- WIA overflow: block new writes until IR flush and WIA clear (no overflow flag)
-- WIA entry now stores complete extent list of file (not just new extents)
+- WIA entry redesigned as fixed 20 bytes: {file_id, seg0_lba, operation} —
+  no extents, no variable length, no heap/allocator inside WIA
+- WIA overflow: new writes block until a slot frees up (fixed-size slots,
+  no separate overflow flag needed)
+- WIA `generation` field removed — WIA has a single non-replicated copy,
+  nothing to arbitrate between
+- WIA operations redefined as bitflags; WIA_OP_DELETE and WIA_OP_RENAME
+  (with WIA_RENAME_OF / WIA_RENAME_IF) added
+- WIA entries unsorted on disk; runtime uses a sharded in-memory
+  file_id → slot index map plus a single free-list for allocation
+- DELETE now goes through WIA like every other mutating operation
+- RENAME across directories now WIA-guarded via an adjacent slot pair
+  (OF/IF), pairing determined by physical slot adjacency, not a stored
+  link; destination is always committed before source removal so the
+  intermediate crash state is a safe superset (visible in both
+  directories), never a hole
 - SMI Entry redesigned: {file_id u64, seg0_lba u64} — 16 bytes
   Extent pool removed from SMI — extents live in SEG 0
+- SMI Header: `used_blocks` field removed — bitmap is the sole source
+  of truth for free space, never persisted or cached on disk
+- COW_EXPAND folded into IR Expansion as ordinary WIA_OP_EXPAND-tagged
+  COW_WRITE relocation — no separate defragmentation step
 - SEG 0 redesigned as file manifest:
   carries complete extent list, generation counter, IS_INLINE flag
   IS_INLINE=1: data inline in SEG 0 (≤ 3680B), no additional blocks
@@ -1788,7 +2080,9 @@ GC + Snapshot interaction formalized. IR Expansion moved to Phase 1.
 - IS_SNAPSHOT_SEG removed: snapshot ownership determined by created_at comparison
 - GC removed as separate process: bitmap updated inline on COW_WRITE, DELETE, TRUNCATE
 - Bitmap construction at mount: SMI extents + all live snap file extents
-- resfs-gc tool removed: verify --rebuild-bitmap for manual bitmap rebuild
+- resfs-gc tool removed
+- resfs-verify no longer exposes a bitmap-rebuild mode — the bitmap has
+  no on-disk form to rebuild; it is only ever built fresh at mount
 - resfs-label tool removed
 - resfs-export and resfs-visualize and resfs-import added to tooling
 - version field split: u32 → {major u8, minor u8, patch u16} in BH and EOP
@@ -1796,7 +2090,15 @@ GC + Snapshot interaction formalized. IR Expansion moved to Phase 1.
 - DLI Header: entry_size field removed (constant 24B)
 - Extent: seg_start_index and seg_count removed → {start_lba u64, length_blocks u64, ext_index u32} — 20 bytes
 - Minimum partition size: 16 MB
-- Full atomics write path formalized for all operations: CREATE, COW_WRITE, COW_DEFRAG, COW_EXPAND, TRUNCATE, DELETE, RENAME, SNAPSHOT_CREATE, SNAPSHOT_DELETE
+- Full atomics write path formalized for all operations: CREATE, COW_WRITE, COW_DEFRAG, IR Expansion relocation, TRUNCATE, DELETE, RENAME, SNAPSHOT_CREATE, SNAPSHOT_DELETE
+- BH & EOP formalized as mutual recovery backups for each other's layout fields
+- RENAME write path corrected: bitmap allocation for both directories'
+  new SEG 0 blocks now explicitly precedes WIA pair allocation, since the
+  WIA entry must record a real, already-allocated seg0_lba
+- WIA on Recovery: WIA_OP_RENAME entries are now explicitly excluded from
+  the generic SMI add/remove step and handled exclusively by RENAME
+  Recovery, avoiding double-processing of the same entry under two
+  incompatible interpretations
 
 ---
 
