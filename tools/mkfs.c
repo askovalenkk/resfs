@@ -189,7 +189,7 @@ int gdisk_manual(void)
 	printf("\n");
 	printf("GPT is not altered due to no access to parental block device.\n");
 	printf("Please update Partition Type GUID using gdisk or other utility.\n\n");
-	printf("ResFS Partition Type GUID: 52455346-494C-4553-5953-54454D2F414B.\n");
+	printf("ResFS Partition Type GUID: 46534552-4C49-5345-5953-54454D2F414B.\n");
 
 	return 0;
 }
