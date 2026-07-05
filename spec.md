@@ -1772,29 +1772,19 @@ struct resfs_recovery_info {
 
 | Tool              | Function                                              |
 |-------------------|-------------------------------------------------------|
-| `mkfs.resfs`      | Format partition: write BH, WIA, SR, IR1/2/3, EOP    |
-| `resfs-mount`     | Mount via platform VFS adapter (RhCOS, custom kernel) |
+| `mkfs.resfs`      | Format partition: write BH, WIA, SR, IR1/2/3, EOP     |
 | `resfs-recover`   | Full disk scan → reconstruct all files                |
-| `resfs-verify`    | Verify BLAKE3 integrity of all segments                |
-| `resfs-visualize` | ASCII visualization of segment and free space layout  |
+| `resfs-verify`    | Verify BLAKE3 integrity of all segments               |
 | `resfs-snap`      | Create, list, restore, delete snapshots               |
 | `resfs-export`    | Extract raw file or recovery container from ResFS     |
-| `resfs-import`    | Import from ext4/NTFS/exFAT/APFS to ResFS            |
-
-### resfs-export modes
-
-```
-mode 1 — full recovery:
-  resfs-export disk.img movie.mp4
-  → extract file, fill gaps with zeros
-
-mode 2 — recovery container:
-  resfs-export --recovery disk.img movie.resrecovery
-  → extract file + recovery_info (missing/damaged segment map)
-  → consumer decides how to handle gaps
-```
+| `resfs-import`    | Import from ext4/NTFS/exFAT/APFS to ResFS             |
+| `resfs-dump`      | Print human-readable FS layout                        |
+| `resfs-info`      | Show and change FS info (label, feature flags, etc.)  |
+| `resfs-db`        | FS debug interactive shell                            |
+| `resfs-stat`      | FS statictics (fragmentation level, free space, etc.) |
 
 ---
+
 ## Build Model
 
 libresfs core (libresfs/include/, libresfs/src/):

@@ -129,7 +129,10 @@ This produces:
 - `tools/snap` — snapshot management
 - `tools/export` — extract raw file or recovery container from ResFS
 - `tools/import` — import from ext4/NTFS/exFAT/APFS to ResFS
-- `tools/visualize` — ASCII visualization of segment and free space layout
+- `tools/info` — shows and change basic FS info
+- `tools/dump` — human-readable metadata layout
+- `tools/db` — debug interactive shell
+- `tools/stat` — shows FS statistics
 
 ### Clean
 Removes all compiled objects, `libresfs.a` and tool binaries:
@@ -150,7 +153,10 @@ After installation, you can use these commands from your CLI:
 - `resfs-snap`
 - `resfs-export`
 - `resfs-import`
-- `resfs-visualize`
+- `resfs-info`
+- `resfs-dump`
+- `resfs-db`
+- `resfs-stat`
 
 # Testing
 
