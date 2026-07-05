@@ -4,7 +4,8 @@
 *  Copyright (c) 2026 Andrei Kovalenko
 */
 
-/*  ResFS platform compatibility layer.
+/*  
+*  ResFS Platform Compatibility Layer.
 *  
 *  ResFS Library (libresfs) is a standalone library which can be
 *  compiled as freestanding code. The only C standard library
