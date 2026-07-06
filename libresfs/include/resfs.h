@@ -234,6 +234,13 @@ struct resfs_smi_entry {
 	uint64_t seg0_lba;
 } __packed;
 
+struct resfs_smi_block {
+	struct resfs_smi_entry entries[254];
+	uint8_t blake3_hash[32];
+} __packed;
+
+_Static_assert(sizeof(struct resfs_smi_block) == 4096, "resfs_smi_block must be 4096 bytes");
+
 struct resfs_dli_h {
 	uint8_t dli_sig[8];
 	uint64_t reserved1;
@@ -251,6 +258,14 @@ struct resfs_dli_entry {
 	uint64_t file_id;
 	uint64_t parent_dir_id;
 } __packed;
+
+struct resfs_dli_block {
+	struct resfs_dli_entry entries[169];
+	uint64_t reserved;
+	uint8_t blake3_hash[32];
+} __packed;
+
+_Static_assert(sizeof(struct resfs_dli_block) == 4096, "resfs_dli_block must be 4096 bytes");
 
 struct resfs_seg0 {
 	uint8_t seg_sig[8];
