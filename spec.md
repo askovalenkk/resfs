@@ -1802,8 +1802,8 @@ tools/ (mkfs, verify, recover, snap, export, import, visualize):
 
 ## Target Platforms
 
-| Platform            | Suitable  | Notes                                 |
-| ------------------- | --------- | ------------------------------------- |
+| Platform            | Suitable   | Notes                                 |
+| ------------------- | ---------- | ------------------------------------- |
 | Embedded / IoT      | ✅ Primary | Small disks, power loss tolerance     |
 | Video recorders     | ✅         | Partial file recovery on power loss   |
 | Routers / cameras   | ✅         | Configs, logs, small files            |
@@ -1811,7 +1811,7 @@ tools/ (mkfs, verify, recover, snap, export, import, visualize):
 | Server              | ✅         | CoW + snapshots                       |
 | Linux               | ✅         | Via platform adapter or kernel module |
 | macOS Intel         | ✅         | Via platform adapter                  |
-| macOS Apple Silicon | ⚠️        | Requires disabling Secure Boot        |
+| macOS Apple Silicon | ⚠️         | Requires disabling Secure Boot        |
 | Windows             | ✅         | Via WinFSP                            |
 | RhK                 | ✅ Target  | libresfs portable, no OS deps         |
 
