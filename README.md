@@ -52,17 +52,6 @@ resfs/
 │       ├── blake3_impl.h
 │       ├── blake3.c
 │       └── blake3.h  
-├── tools/
-│   ├── mkfs.c
-│   ├── verify.c
-│   ├── recover.c
-│   ├── snap.c
-│   ├── export.c
-│   ├── import.c
-│   ├── info.c
-│   ├── stat.c
-│   ├── dump.c
-│   └── db.c
 ├── platform/
 │   ├── linux/
 │   │   ├── dir.c
@@ -74,7 +63,18 @@ resfs/
 │   │   ├── internal.h
 │   │   ├── Makefile
 │   │   └── Kconfig
-│   └── userspace/  
+│   └── userspace/
+├── tools/
+│   ├── mkfs.c
+│   ├── verify.c
+│   ├── recover.c
+│   ├── snap.c
+│   ├── export.c
+│   ├── import.c
+│   ├── info.c
+│   ├── stat.c
+│   ├── dump.c
+│   └── db.c
 └── tests/
     ├── mkfs.sh
     ├── verify.sh
