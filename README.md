@@ -22,12 +22,14 @@ Official documentation of ResFS:
 resfs/
 ├── spec.md            
 ├── README.md
-├── Makefile 
-├── LICENSE 
+├── LICENSE
 ├── .gitignore
+├── Makefile
 ├── libresfs/
 │   ├── include/
-│   │   └── resfs.h  
+│   │   ├── resfs.h
+│   │   ├── platform.h
+│   │   └── version.h  
 │   ├── src/
 │   │   ├── bh.c
 │   │   ├── cow.c
@@ -41,6 +43,15 @@ resfs/
 │   │   ├── snap.c
 │   │   └── wia.c
 │   └── vendor/blake3/
+│       ├── blake3_avx2.c
+│       ├── blake3_avx512.c
+│       ├── blake3_sse2.c
+│       ├── blake3_sse41.c
+│       ├── blake3_dispatch.c
+│       ├── blake3_portable.c
+│       ├── blake3_impl.h
+│       ├── blake3.c
+│       └── blake3.h  
 ├── tools/
 │   ├── mkfs.c
 │   ├── verify.c
@@ -48,12 +59,26 @@ resfs/
 │   ├── snap.c
 │   ├── export.c
 │   ├── import.c
-│   └── visualize.c
+│   ├── info.c
+│   ├── stat.c
+│   ├── dump.c
+│   └── db.c
+├── platform/
+│   ├── linux/
+│   │   ├── dir.c
+│   │   ├── file.c
+│   │   ├── fs.c
+│   │   ├── inode.c
+│   │   ├── module.c
+│   │   ├── super.c
+│   │   ├── internal.h
+│   │   ├── Makefile
+│   │   └── Kconfig
+│   └── userspace/  
 └── tests/
     ├── mkfs.sh
     ├── verify.sh
     ├── recover.sh
-    ├── search.sh
     ├── kill-9.sh
     ├── corrupt-gpt.sh
     └── corrupt-metadata.sh
@@ -161,17 +186,13 @@ After installation, you can use these commands from your CLI:
 # Testing
 
 After cloning it with the command:
-
 ```bash
 git clone https://github.com/askovalenkk/resfs
 ```
 
 You can run the bash scripts from `tests/`:
-- `mkfs.sh` — makes a disk image and formats it with a ResFS partition
-- `verify.sh` — check disk for any corruptions
-- `recover.sh` — finds and recovers all existing files on the disk partition
-- `search.sh` — finds LBA boundaries of the ResFS disk partition without GPT
-- `kill-9.sh` — runs *kill -9* while writing files on the disk partition
+- `mkfs.sh` — make and verify a disk image and formats it with a ResFS partition
+- `kill-9.sh` — run *kill -9* while writing files on the disk partition
 - `corrupt-gpt.sh` — target *dd if=/dev/zero...* for both GPT copies of the ResFS disk image
 - `corrupt-metadata.sh` — target *dd if=/dev/zero...* for all disk metadata
 
