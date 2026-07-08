@@ -26,5 +26,8 @@ mkfs
 recover
 snap
 verify
-visualize
+stat
+info
+dump
+db
 local.mk
