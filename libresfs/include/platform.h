@@ -1,5 +1,5 @@
 /*
-*  resfs/libresfs/include/resfs_platform.h
+*  resfs/libresfs/include/platform.h
 *  SPDX-License-Identifier: MIT
 *  Copyright (c) 2026 Andrei Kovalenko
 */
