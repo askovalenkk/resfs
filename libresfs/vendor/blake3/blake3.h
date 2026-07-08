@@ -7,7 +7,7 @@
 #define BLAKE3_H
 
 #include <stddef.h>
-#include "resfs_platform.h"
+#include "platform.h"
 
 #if !defined(BLAKE3_API)
 # if defined(_WIN32) || defined(__CYGWIN__)

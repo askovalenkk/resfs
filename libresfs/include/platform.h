@@ -22,8 +22,8 @@
 *  
 */
 
-#ifndef RESFS_PLATFORM_H
-#define RESFS_PLATFORM_H
+#ifndef PLATFORM_H
+#define PLATFORM_H
 
 #ifdef __KERNEL__
 #include <linux/string.h>
@@ -35,4 +35,4 @@
 #include <string.h>
 
 #endif
-#endif /* RESFS_PLATFORM_H */
+#endif /* PLATFORM_H */

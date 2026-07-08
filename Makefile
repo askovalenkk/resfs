@@ -36,7 +36,9 @@ endif
 LIB_SRCS = $(LIBRESFS_SRCS) $(BLAKE3_SRCS)
 LIB_OBJS = $(patsubst %.c,$(OBJDIR)/%.o,$(LIB_SRCS))
 
-TOOLS = tools/mkfs tools/verify tools/recover tools/snap tools/export tools/import tools/visualize
+TOOLS = tools/mkfs tools/verify tools/recover tools/snap \
+	tools/export tools/import tools/db tools/stat \
+	tools/dump tools/info
 
 all: libresfs.a $(TOOLS)
 
@@ -65,7 +67,10 @@ install: $(TOOLS)
 	install -m 755 tools/snap /usr/local/bin/resfs-snap
 	install -m 755 tools/export /usr/local/bin/resfs-export
 	install -m 755 tools/import /usr/local/bin/resfs-import
-	install -m 755 tools/visualize /usr/local/bin/resfs-visualize
+	install -m 755 tools/db /usr/local/bin/resfs-db
+	install -m 755 tools/stat /usr/local/bin/resfs-stat
+	install -m 755 tools/dump /usr/local/bin/resfs-dump
+	install -m 755 tools/info /usr/local/bin/resfs-info
 
 .PHONY: all clean install
 

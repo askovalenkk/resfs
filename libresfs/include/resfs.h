@@ -12,6 +12,8 @@
 #include "version.h"
 #include "blake3.h"
 
+#define __packed __attribute__((packed))
+
 /* ResFS signatures */
 #define BH_SIG "RESFS PARTITION "
 #define ROOT_SIG "RESFS ROOT"
@@ -101,9 +103,6 @@
 #define RESFS_MAX_EXTENTS 183
 #define RESFS_MIN_FREE 1
 #define RESFS_MIN_SIZE_MB 16
-
-
-#define __packed __attribute__((packed))
 
 struct resfs_bh {
 	uint8_t bh_sig[16];

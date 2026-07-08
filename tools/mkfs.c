@@ -526,7 +526,14 @@ int get_params(struct mkfs_args *args, struct dev_params *params)
 			close(fd);
 			return ERR_INVALID;
 		}
-		params->size_bytes = st.st_size;
+		if (st.st_size / 1024 / 1024 > RESFS_MIN_SIZE_MB) {
+			params->size_bytes = st.st_size;
+		}
+		else {
+			fprintf(stderr, "mkfs.resfs: error: invalid disk image size (min: 16MB)\n");
+			close(fd);
+			return ERR_INVALID;
+		}
 		params->fd = fd;
 		params->logical_sector_size = 4096;
 		params->physical_sector_size = 4096;
